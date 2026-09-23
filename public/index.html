@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>كَلَك | Kalak</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- LANDING -->
+  <div id="screen-landing" class="screen active">
+    <div class="landing-bg"><div class="bg-blob b1"></div><div class="bg-blob b2"></div><div class="bg-blob b3"></div></div>
+    <div class="landing-inner">
+      <div class="logo-wrap">
+        <div class="mascot-wrap">
+          <svg viewBox="0 0 100 100" width="88" height="88" class="mascot-svg">
+            <defs><linearGradient id="mg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#7c3aed"/><stop offset="100%" stop-color="#a855f7"/></linearGradient></defs>
+            <rect x="12" y="22" width="76" height="56" rx="14" fill="url(#mg)"/>
+            <rect x="20" y="30" width="24" height="18" rx="5" fill="#1e1145"/>
+            <rect x="56" y="30" width="24" height="18" rx="5" fill="#1e1145"/>
+            <circle cx="32" cy="39" r="5" fill="#22d3ee"/><circle cx="34" cy="37" r="1.5" fill="#fff"/>
+            <circle cx="68" cy="39" r="5" fill="#22d3ee"/><circle cx="70" cy="37" r="1.5" fill="#fff"/>
+            <path d="M36 58 Q50 68 64 58" stroke="#f472b6" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+            <rect x="22" y="78" width="14" height="12" rx="5" fill="#7c3aed"/>
+            <rect x="64" y="78" width="14" height="12" rx="5" fill="#7c3aed"/>
+            <circle cx="26" cy="16" r="6" fill="#facc15"/><rect x="24" y="16" width="4" height="8" rx="2" fill="#facc15"/>
+            <circle cx="74" cy="16" r="6" fill="#facc15"/><rect x="72" y="16" width="4" height="8" rx="2" fill="#facc15"/>
+          </svg>
+        </div>
+        <h1 class="logo-text">كَلَك</h1>
+        <p class="logo-sub">KALAK</p>
+        <p class="logo-desc" id="logo-desc">تحدى أصدقاءك في أسئلة المعرفة!</p>
+      </div>
+      <div class="landing-btns">
+        <button class="btn btn-glow" id="btn-create"><span>🎮</span> <span id="t-create">انشئ غرفة</span></button>
+        <button class="btn btn-outline" id="btn-join-toggle"><span>🚪</span> <span id="t-joinRoom">انضم لغرفة</span></button>
+        <div class="join-row hidden" id="join-group">
+          <input type="text" id="input-code" class="inp" placeholder="XXXXX" maxlength="5" dir="ltr" autocomplete="off">
+          <button class="btn btn-green" id="btn-join">انضم</button>
+        </div>
+      </div>
+      <div class="lang-row">
+        <button class="lang-btn active" data-lang="ar">عربي</button>
+        <button class="lang-btn" data-lang="en">EN</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PROFILE -->
+  <div id="screen-profile" class="screen">
+    <div class="s-inner">
+      <h2 class="s-title" id="t-chooseChar">اختر شخصيتك</h2>
+      <div class="avatar-grid" id="avatar-grid"></div>
+      <input type="text" id="input-name" class="inp inp-big" placeholder="اسمك" maxlength="15">
+      <button class="btn btn-glow w-full" id="btn-ready">يلا نلعب! 🎯</button>
+    </div>
+  </div>
+
+  <!-- LOBBY -->
+  <div id="screen-lobby" class="screen">
+    <div class="s-inner">
+      <h2 class="s-title" id="t-lobby">غرفة الانتظار</h2>
+      <div class="code-box">
+        <span class="code-label" id="t-roomCode">كود الغرفة</span>
+        <span class="code-val" id="lobby-code">-----</span>
+        <button class="icon-btn" id="btn-copy">📋</button>
+        <button class="icon-btn" id="btn-share">🔗</button>
+      </div>
+      <div class="players-grid" id="lobby-players"></div>
+      <div class="settings-box" id="settings-box">
+        <h3 class="set-title">⚙️ <span id="t-settings">إعدادات اللعبة</span></h3>
+        <div class="set-row"><label id="t-cats">الفئات</label>
+          <div class="chips" id="chips">
+            <button class="chip on" data-c="general">عام 🌍</button>
+            <button class="chip" data-c="geography">جغرافيا 🗺️</button>
+            <button class="chip" data-c="history">تاريخ 📜</button>
+            <button class="chip" data-c="science">علوم 🔬</button>
+            <button class="chip" data-c="literature">أدب 📚</button>
+            <button class="chip" data-c="sports">رياضة ⚽</button>
+            <button class="chip" data-c="entertainment">ترفيه 🎬</button>
+            <button class="chip" data-c="technology">تقنية 💻</button>
+            <button class="chip" data-c="food">طعام 🍕</button>
+            <button class="chip" data-c="islam">إسلام 🕌</button>
+            <button class="chip" data-c="arabic">عربي 🏜️</button>
+            <button class="chip" data-c="animals">حيوانات 🐾</button>
+            <button class="chip" data-c="flags">أعلام 🏳️</button>
+          </div>
+        </div>
+        <div class="set-row"><label id="t-rounds">الجولات</label><div class="stepper"><button class="step-btn" data-s="rounds" data-d="-1">−</button><span class="step-val" id="v-rounds">5</span><button class="step-btn" data-s="rounds" data-d="1">+</button></div></div>
+        <div class="set-row"><label id="t-atime">وقت الإجابة</label><div class="stepper"><button class="step-btn" data-s="answerTime" data-d="-5">−</button><span class="step-val" id="v-answerTime">30</span><button class="step-btn" data-s="answerTime" data-d="5">+</button></div></div>
+        <div class="set-row"><label id="t-vtime">وقت التصويت</label><div class="stepper"><button class="step-btn" data-s="voteTime" data-d="-5">−</button><span class="step-val" id="v-voteTime">20</span><button class="step-btn" data-s="voteTime" data-d="5">+</button></div></div>
+        <div class="set-row"><label id="t-maxp">الحد الأقصى</label><div class="stepper"><button class="step-btn" data-s="maxPlayers" data-d="-1">−</button><span class="step-val" id="v-maxPlayers">12</span><button class="step-btn" data-s="maxPlayers" data-d="1">+</button></div></div>
+        <div class="set-row"><label id="t-lang">اللغة</label><div class="stepper"><button class="lang-set active" data-lang="ar">عربي</button><button class="lang-set" data-lang="en">EN</button></div></div>
+      </div>
+      <button class="btn btn-glow w-full hidden" id="btn-start">ابدأ اللعبة! 🚀</button>
+      <p class="wait-msg" id="wait-msg">في انتظار المضيف...</p>
+      <div class="chat-box">
+        <div class="chat-msgs" id="chat-msgs"></div>
+        <div class="chat-row"><input type="text" id="inp-chat" class="inp inp-chat" placeholder="رسالة..." maxlength="200"><button class="btn btn-green btn-sm" id="btn-chat">↑</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CATEGORY PICK -->
+  <div id="screen-picking" class="screen">
+    <div class="s-inner pick-screen">
+      <div class="pick-header">
+        <div class="pick-round" id="pick-round">الجولة 1/5</div>
+        <div class="timer-wrap"><svg viewBox="0 0 100 100"><circle class="t-bg" cx="50" cy="50" r="44"/><circle class="t-prog" cx="50" cy="50" r="44" id="pick-ring"/></svg><span class="t-num" id="pick-timer">15</span></div>
+      </div>
+      <div class="pick-who" id="pick-who">
+        <span class="pick-avatar" id="pick-avatar">😎</span>
+        <span class="pick-name" id="pick-name">Player</span>
+        <span class="pick-label" id="pick-label">يختار الموضوع</span>
+      </div>
+      <div class="pick-cats" id="pick-cats"></div>
+      <p class="pick-wait hidden" id="pick-wait">في انتظار الاختيار...</p>
+    </div>
+  </div>
+
+  <!-- QUESTION -->
+  <div id="screen-question" class="screen">
+    <div class="s-inner">
+      <div class="game-top">
+        <div class="badge" id="q-round">1/5</div>
+        <div class="timer-wrap"><svg viewBox="0 0 100 100"><circle class="t-bg" cx="50" cy="50" r="44"/><circle class="t-prog" cx="50" cy="50" r="44" id="q-ring"/></svg><span class="t-num" id="q-timer">30</span></div>
+        <div class="badge badge-cat" id="q-cat">عام</div>
+      </div>
+      <div class="q-card">
+        <span class="q-num" id="q-num">Q1</span>
+        <p class="q-text" id="q-text"></p>
+      </div>
+      <div class="ans-area">
+        <input type="text" id="inp-ans" class="inp inp-big" placeholder="اكتب إجابة مقنعة...">
+        <button class="btn btn-glow w-full" id="btn-ans">إرسال ✓</button>
+        <p class="ans-status" id="ans-status"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- VOTING -->
+  <div id="screen-voting" class="screen">
+    <div class="s-inner">
+      <div class="game-top">
+        <div class="badge" id="vt-round">1/5</div>
+        <div class="timer-wrap"><svg viewBox="0 0 100 100"><circle class="t-bg" cx="50" cy="50" r="44"/><circle class="t-prog" cx="50" cy="50" r="44" id="vt-ring"/></svg><span class="t-num" id="vt-timer">20</span></div>
+      </div>
+      <h2 class="vote-title" id="t-voteTitle">اختر الإجابة الصحيحة!</h2>
+      <div class="vote-list" id="vote-list"></div>
+      <p class="vote-status" id="vote-status"></p>
+    </div>
+  </div>
+
+  <!-- RESULTS -->
+  <div id="screen-results" class="screen">
+    <div class="s-inner">
+      <h2 class="s-title">النتائج 🏆</h2>
+      <div class="correct-box" id="correct-box"></div>
+      <div class="breakdown" id="breakdown"></div>
+      <div class="res-list" id="res-list"></div>
+      <div class="sb-mini" id="sb-mini"></div>
+      <button class="btn btn-glow w-full hidden" id="btn-next">الجولة التالية ➡️</button>
+    </div>
+  </div>
+
+  <!-- FINAL -->
+  <div id="screen-final" class="screen">
+    <div class="s-inner">
+      <div id="confetti"></div>
+      <h2 class="s-title final-t">🎉 انتهت اللعبة! 🎉</h2>
+      <div class="podium" id="podium"></div>
+      <div class="final-sb" id="final-sb"></div>
+      <button class="btn btn-glow w-full" id="btn-again">العب مرة ثانية 🔄</button>
+      <button class="btn btn-outline w-full" id="btn-home" style="margin-top:10px">الرئيسية 🏠</button>
+    </div>
+  </div>
+
+  <!-- KICKED -->
+  <div id="screen-kicked" class="screen">
+    <div class="s-inner" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:70vh">
+      <div style="font-size:72px;margin-bottom:16px">🚫</div>
+      <h2 class="s-title">تم طردك من الغرفة</h2>
+      <button class="btn btn-glow" onclick="location.reload()" style="margin-top:20px">الرئيسية 🏠</button>
+    </div>
+  </div>
+
+  <!-- DEBUG -->
+  <div id="debug" class="debug hidden">
+    <div class="dbg-head"><span>🛠️ Debug</span><button class="dbg-x" id="dbg-x">✕</button></div>
+    <div class="dbg-body">
+      <div class="dbg-sec"><h4>Controls</h4>
+        <button class="dbg-btn" id="d-pause">⏸ Pause/Resume</button>
+        <button class="dbg-btn" id="d-skip">⏭ Skip Phase</button>
+        <button class="dbg-btn dbg-red" id="d-end">🛑 End Game</button>
+        <button class="dbg-btn" id="d-add">➕ +5 Rounds</button>
+      </div>
+      <div class="dbg-sec"><h4>Answers</h4><div id="d-ans" class="d-ans">...</div><button class="dbg-btn" id="d-ref">🔄 Refresh</button></div>
+      <div class="dbg-sec"><h4>Players</h4><div id="d-players"></div></div>
+    </div>
+  </div>
+
+  <!-- PAUSED -->
+  <div id="paused" class="paused hidden"><div class="paused-c"><span style="font-size:48px">⏸️</span><h2>اللعبة متوقفة</h2></div></div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
