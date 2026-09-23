@@ -152,4 +152,4 @@ You may need to allow Node.js through the computer's firewall.
 
 ## License
 
-Not chosen yet. All rights reserved by the author until a license is added.
+© 2026 Hamza Ben Ismail. All rights reserved.
