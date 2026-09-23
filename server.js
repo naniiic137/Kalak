@@ -1,727 +1,518 @@
+'use strict';
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
 const path = require('path');
+const crypto = require('crypto');
+const { Server } = require('socket.io');
+const L = require('./lib/logic');
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
-app.use(express.static(path.join(__dirname, 'public')));
+const PICK_TIME = 15;
+const DEFAULT_GRACE_MS = 60_000;
+const TOKEN_RE = /^[A-Za-z0-9_-]{16,64}$/;
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
-const rooms = new Map();
+/**
+ * Builds the HTTP + Socket.io server. Options (mostly for tests):
+ *   graceMs          how long a disconnected player keeps their seat (default 60 s)
+ *   advanceDelayMs   pause before moving on once everyone has answered/voted (default 500 ms)
+ *   disconnectSettleMs  after a disconnect, wait this long (a page reload usually comes back
+ *                    within it) before re-checking whether the round can move on (default 3 s)
+ *   log              logger for handler errors (default console.error)
+ */
+function createGameServer(opts = {}) {
+  const graceMs = opts.graceMs ?? DEFAULT_GRACE_MS;
+  const advanceDelayMs = opts.advanceDelayMs ?? 500;
+  const settleMs = opts.disconnectSettleMs ?? 3000;
+  const log = opts.log || ((...a) => console.error('[kalak]', ...a));
 
-const QUESTIONS = {
-  general: [
-    {q:"كم لون في قوس قزح؟",a:"سبعة",qE:"How many colors in a rainbow?",aE:"Seven"},
-    {q:"ما الرياضة الأكثر شعبية في العالم؟",a:"كرة القدم",qE:"Most popular sport in the world?",aE:"Football/Soccer"},
-    {q:"كم يوماً في السنة الكبيسة؟",a:"366",qE:"How many days in a leap year?",aE:"366"},
-    {q:"ما العملة الرسمية لليابان؟",a:"الين",qE:"Official currency of Japan?",aE:"Yen"},
-    {q:"ما أسرع حيوان بري؟",a:"الفهد",qE:"Fastest land animal?",aE:"Cheetah"},
-    {q:"كم ثانية في الساعة؟",a:"3600",qE:"Seconds in an hour?",aE:"3600"},
-    {q:"ما أكبر حيوان على الأرض؟",a:"الحوت الأزرق",qE:"Largest animal on Earth?",aE:"Blue whale"},
-    {q:"كم ساعة في اليوم؟",a:"24",qE:"Hours in a day?",aE:"24"},
-    {q:"ما لون السماء الصافية؟",a:"أزرق",qE:"Color of a clear sky?",aE:"Blue"},
-    {q:"كم جناح للفراشة؟",a:"أربعة",qE:"How many wings does a butterfly have?",aE:"Four"},
-    {q:"ما أكثر مشروب استهلاكاً بعد الماء؟",a:"الشاي",qE:"Most consumed drink after water?",aE:"Tea"},
-    {q:"ما الكوكب الأحمر؟",a:"المريخ",qE:"Which planet is the Red Planet?",aE:"Mars"},
-    {q:"كم حرف في الأبجدية الإنجليزية؟",a:"26",qE:"Letters in the English alphabet?",aE:"26"},
-    {q:"ما أطول حيوان بري؟",a:"الزرافة",qE:"Tallest land animal?",aE:"Giraffe"},
-    {q:"كم قارة في العالم؟",a:"سبع",qE:"How many continents?",aE:"Seven"},
-    {q:"ما الشهر الأول في السنة؟",a:"يناير",qE:"First month of the year?",aE:"January"},
-    {q:"كم عدد أيام الأسبوع؟",a:"سبعة",qE:"Days in a week?",aE:"Seven"},
-    {q:"ما المعدن الأغلى؟",a:"الذهب",qE:"Most precious common metal?",aE:"Gold"},
-    {q:"كم دقيقة في الساعة؟",a:"60",qE:"Minutes in an hour?",aE:"60"},
-    {q:"ما الحيوان الذي يُسمى سفينة الصحراء؟",a:"الجمل",qE:"Which animal is called ship of the desert?",aE:"Camel"},
-    {q:"ما أصغر قارة؟",a:"أوقيانوسيا",qE:"Smallest continent?",aE:"Australia/Oceania"},
-    {q:"ما لون الشمس عند الغروب؟",a:"برتقالي",qE:"Color of the sun at sunset?",aE:"Orange"},
-    {q:"كم عين للإنسان؟",a:"اثنتان",qE:"How many eyes does a human have?",aE:"Two"},
-    {q:"ما أكبر طائر في العالم؟",a:"النعامة",qE:"Largest bird in the world?",aE:"Ostrich"},
-    {q:"ما أصغر كوكب في المجموعة الشمسية؟",a:"عطارد",qE:"Smallest planet in our solar system?",aE:"Mercury"},
-  ],
-  geography: [
-    {q:"ما أصغر دولة في العالم؟",a:"الفاتيكان",qE:"Smallest country in the world?",aE:"Vatican City"},
-    {q:"ما أطول نهر في العالم؟",a:"النيل",qE:"Longest river in the world?",aE:"The Nile"},
-    {q:"ما عاصمة أستراليا؟",a:"كانبرا",qE:"Capital of Australia?",aE:"Canberra"},
-    {q:"ما أكبر محيط؟",a:"المحيط الهادئ",qE:"Largest ocean?",aE:"Pacific Ocean"},
-    {q:"ما عاصمة اليابان؟",a:"طوكيو",qE:"Capital of Japan?",aE:"Tokyo"},
-    {q:"ما أكبر صحراء في العالم؟",a:"الصحراء الكبرى",qE:"Largest desert?",aE:"Sahara"},
-    {q:"ما عاصمة البرازيل؟",a:"برازيليا",qE:"Capital of Brazil?",aE:"Brasilia"},
-    {q:"أين يقع برج إيفل؟",a:"باريس",qE:"Where is the Eiffel Tower?",aE:"Paris"},
-    {q:"ما أعلى جبل في العالم؟",a:"إيفرست",qE:"Tallest mountain?",aE:"Everest"},
-    {q:"ما أكبر جزيرة؟",a:"غرينلاند",qE:"Largest island?",aE:"Greenland"},
-    {q:"ما عاصمة كندا؟",a:"أوتاوا",qE:"Capital of Canada?",aE:"Ottawa"},
-    {q:"أين يقع تاج محل؟",a:"الهند",qE:"Where is the Taj Mahal?",aE:"India"},
-    {q:"ما عاصمة تركيا؟",a:"أنقرة",qE:"Capital of Turkey?",aE:"Ankara"},
-    {q:"ما أطول سلسلة جبلية؟",a:"الأنديز",qE:"Longest mountain range?",aE:"Andes"},
-    {q:"ما عاصمة ألمانيا؟",a:"برلين",qE:"Capital of Germany?",aE:"Berlin"},
-    {q:"ما أكبر دولة مساحة؟",a:"روسيا",qE:"Largest country by area?",aE:"Russia"},
-    {q:"ما عاصمة إسبانيا؟",a:"مدريد",qE:"Capital of Spain?",aE:"Madrid"},
-    {q:"في أي قارة تقع مصر؟",a:"أفريقيا",qE:"Which continent is Egypt on?",aE:"Africa"},
-    {q:"ما عاصمة إيطاليا؟",a:"روما",qE:"Capital of Italy?",aE:"Rome"},
-    {q:"ما أكبر بحيرة عذبة في العالم؟",a:"بحيرة سوبيريور",qE:"Largest freshwater lake?",aE:"Lake Superior"},
-    {q:"ما أعمق نقطة في المحيط؟",a:"خندق ماريانا",qE:"Deepest point in the ocean?",aE:"Mariana Trench"},
-    {q:"ما عاصمة الأرجنتين؟",a:"بوينس آيرس",qE:"Capital of Argentina?",aE:"Buenos Aires"},
-    {q:"ما عاصمة النرويج؟",a:"أوسلو",qE:"Capital of Norway?",aE:"Oslo"},
-    {q:"ما البلد الذي يشتهر بالأهرامات؟",a:"مصر",qE:"Country famous for pyramids?",aE:"Egypt"},
-    {q:"ما عاصمة السويد؟",a:"ستوكهولم",qE:"Capital of Sweden?",aE:"Stockholm"},
-  ],
-  history: [
-    {q:"في أي عام اكتُشفت أمريكا؟",a:"1492",qE:"When was America discovered?",aE:"1492"},
-    {q:"من بنى الأهرامات؟",a:"المصريون القدماء",qE:"Who built the pyramids?",aE:"Ancient Egyptians"},
-    {q:"متى بدأت الحرب العالمية الأولى؟",a:"1914",qE:"When did WWI begin?",aE:"1914"},
-    {q:"من أول رئيس أمريكي؟",a:"جورج واشنطن",qE:"First US president?",aE:"George Washington"},
-    {q:"في أي عام سقط جدار برلين؟",a:"1989",qE:"When did the Berlin Wall fall?",aE:"1989"},
-    {q:"من اخترع المصباح الكهربائي؟",a:"إديسون",qE:"Who invented the light bulb?",aE:"Edison"},
-    {q:"متى تأسست الأمم المتحدة؟",a:"1945",qE:"When was the UN founded?",aE:"1945"},
-    {q:"من اكتشف الجاذبية؟",a:"نيوتن",qE:"Who discovered gravity?",aE:"Newton"},
-    {q:"من أول من مشى على القمر؟",a:"نيل أرمسترونغ",qE:"First person on the Moon?",aE:"Neil Armstrong"},
-    {q:"في أي عام غرقت تايتانيك؟",a:"1912",qE:"When did Titanic sink?",aE:"1912"},
-    {q:"من اخترع الهاتف؟",a:"غراهام بيل",qE:"Who invented the telephone?",aE:"Alexander Graham Bell"},
-    {q:"من بنى سور الصين العظيم؟",a:"الصينيون",qE:"Who built the Great Wall of China?",aE:"The Chinese"},
-    {q:"متى انتهت الحرب العالمية الثانية؟",a:"1945",qE:"When did WWII end?",aE:"1945"},
-    {q:"من قاد ثورة الهند؟",a:"غاندي",qE:"Who led India's independence?",aE:"Gandhi"},
-    {q:"من فتح القسطنطينية؟",a:"محمد الفاتح",qE:"Who conquered Constantinople?",aE:"Mehmed the Conqueror"},
-    {q:"ما أقدم حضارة؟",a:"السومرية",qE:"Oldest civilization?",aE:"Sumerian"},
-    {q:"من اخترع الطباعة؟",a:"غوتنبرغ",qE:"Who invented printing press?",aE:"Gutenberg"},
-    {q:"في أي عام وصل الإنسان للقمر؟",a:"1969",qE:"When did humans reach the Moon?",aE:"1969"},
-    {q:"من رسم الموناليزا؟",a:"دافنشي",qE:"Who painted the Mona Lisa?",aE:"Da Vinci"},
-    {q:"من اخترع الديناميت؟",a:"نوبل",qE:"Who invented dynamite?",aE:"Alfred Nobel"},
-    {q:"في أي عام بدأت الثورة الفرنسية؟",a:"1789",qE:"When did the French Revolution begin?",aE:"1789"},
-    {q:"من كان آخر فراعنة مصر؟",a:"كليوباترا",qE:"Who was the last pharaoh?",aE:"Cleopatra"},
-    {q:"في أي قرن اكتُشف البارود؟",a:"التاسع",qE:"In which century was gunpowder discovered?",aE:"9th century"},
-    {q:"من مؤسس الدولة العثمانية؟",a:"عثمان الأول",qE:"Founder of the Ottoman Empire?",aE:"Osman I"},
-    {q:"متى اكتُشف النفط في السعودية؟",a:"1938",qE:"When was oil discovered in Saudi Arabia?",aE:"1938"},
-  ],
-  science: [
-    {q:"ما العنصر الأكثر وفرة في الكون؟",a:"الهيدروجين",qE:"Most abundant element in the universe?",aE:"Hydrogen"},
-    {q:"كم كوكب في المجموعة الشمسية؟",a:"ثمانية",qE:"Planets in our solar system?",aE:"Eight"},
-    {q:"ما أكبر عضو في الجسم؟",a:"الجلد",qE:"Largest organ in the body?",aE:"Skin"},
-    {q:"كم عظمة في جسم الإنسان؟",a:"206",qE:"Bones in adult human body?",aE:"206"},
-    {q:"ما أقرب كوكب للشمس؟",a:"عطارد",qE:"Closest planet to Sun?",aE:"Mercury"},
-    {q:"ما درجة غليان الماء؟",a:"100 مئوية",qE:"Boiling point of water?",aE:"100°C"},
-    {q:"ما أصلب معدن طبيعي؟",a:"الألماس",qE:"Hardest natural mineral?",aE:"Diamond"},
-    {q:"ما أكبر كوكب في المجموعة الشمسية؟",a:"المشتري",qE:"Largest planet?",aE:"Jupiter"},
-    {q:"ما الرمز الكيميائي للذهب؟",a:"Au",qE:"Chemical symbol for gold?",aE:"Au"},
-    {q:"ما أسرع سرعة في الكون؟",a:"سرعة الضوء",qE:"Fastest speed in the universe?",aE:"Speed of light"},
-    {q:"كم كروموسوم للإنسان؟",a:"46",qE:"Human chromosomes?",aE:"46"},
-    {q:"ما أصغر وحدة حية؟",a:"الخلية",qE:"Smallest unit of life?",aE:"Cell"},
-    {q:"ما الغاز الأكثر في الغلاف الجوي؟",a:"النيتروجين",qE:"Most common gas in atmosphere?",aE:"Nitrogen"},
-    {q:"ما درجة تجمد الماء؟",a:"صفر مئوية",qE:"Freezing point of water?",aE:"0°C"},
-    {q:"ما وحدة قياس القوة؟",a:"نيوتن",qE:"Unit of force?",aE:"Newton"},
-    {q:"كم لتر دم في الجسم؟",a:"خمسة",qE:"Liters of blood in the body?",aE:"About 5"},
-    {q:"ما المعدن الأكثر توصيلاً للكهرباء؟",a:"الفضة",qE:"Most conductive metal?",aE:"Silver"},
-    {q:"ما العضو الذي ينقي الدم؟",a:"الكلية",qE:"Organ that filters blood?",aE:"Kidney"},
-    {q:"ما الحمض النووي الذي يحمل الجينات؟",a:"DNA",qE:"Nucleic acid carrying genes?",aE:"DNA"},
-    {q:"ما الغاز الذي تمتصه النباتات؟",a:"ثاني أكسيد الكربون",qE:"Gas absorbed by plants?",aE:"Carbon dioxide"},
-    {q:"ما أبعد كوكب عن الشمس؟",a:"نبتون",qE:"Farthest planet from Sun?",aE:"Neptune"},
-    {q:"كم عدد فصائل الدم الرئيسية؟",a:"أربع",qE:"Main blood types?",aE:"Four"},
-    {q:"ما سرعة الصوت تقريباً؟",a:"343 م/ث",qE:"Speed of sound approximately?",aE:"343 m/s"},
-    {q:"ما العضو المسؤول عن التوازن؟",a:"الأذن الداخلية",qE:"Organ responsible for balance?",aE:"Inner ear"},
-    {q:"ما أخف غاز في الطبيعة؟",a:"الهيدروجين",qE:"Lightest gas?",aE:"Hydrogen"},
-  ],
-  sports: [
-    {q:"كم مدة شوط كرة القدم؟",a:"45 دقيقة",qE:"Length of one football half?",aE:"45 minutes"},
-    {q:"كم لاعب في فريق كرة السلة؟",a:"خمسة",qE:"Players on a basketball team?",aE:"Five"},
-    {q:"كم حلقة أولمبية؟",a:"خمس",qE:"How many Olympic rings?",aE:"Five"},
-    {q:"ما مسافة الماراثون؟",a:"42 كم",qE:"Marathon distance?",aE:"42 km"},
-    {q:"ما لون بطاقة الطرد؟",a:"حمراء",qE:"Color of ejection card?",aE:"Red"},
-    {q:"أين أقيمت أول بطولة كأس عالم؟",a:"الأوروغواي",qE:"Where was first World Cup?",aE:"Uruguay"},
-    {q:"كم لاعب في فريق الكريكيت؟",a:"11",qE:"Players on a cricket team?",aE:"11"},
-    {q:"ما الرياضة الوطنية لكندا؟",a:"الهوكي",qE:"National sport of Canada?",aE:"Ice hockey"},
-    {q:"في أي رياضة يوجد الإيس؟",a:"التنس",qE:"Sport with an 'ace'?",aE:"Tennis"},
-    {q:"كم جولة في الملاكمة المحترفة؟",a:"12",qE:"Rounds in pro boxing?",aE:"12"},
-    {q:"ما الرياضة التي تُلعب على الجليد بعصا؟",a:"الهوكي",qE:"Sport played on ice with a stick?",aE:"Hockey"},
-    {q:"كم لاعب في فريق البيسبول؟",a:"تسعة",qE:"Players on a baseball team?",aE:"Nine"},
-    {q:"ما الرياضة الأشهر في الهند؟",a:"الكريكيت",qE:"Most popular sport in India?",aE:"Cricket"},
-    {q:"كم شوط في مباراة التنس كحد أقصى؟",a:"خمسة",qE:"Max sets in a tennis match?",aE:"Five"},
-    {q:"من أي بلد نشأت الجودو؟",a:"اليابان",qE:"Where did judo originate?",aE:"Japan"},
-    {q:"ما وزن كرة القدم الرسمية تقريباً؟",a:"450 غرام",qE:"Weight of official football?",aE:"450 grams"},
-    {q:"كم لاعب في فريق كرة الماء؟",a:"سبعة",qE:"Players on water polo team?",aE:"Seven"},
-    {q:"ما الرياضة التي يُستخدم فيها المضرب والريشة؟",a:"الريشة الطائرة",qE:"Sport with racket and shuttlecock?",aE:"Badminton"},
-    {q:"كم تبلغ مدة مباراة كرة السلة؟",a:"48 دقيقة",qE:"NBA game duration?",aE:"48 minutes"},
-    {q:"ما أقدم رياضة أولمبية؟",a:"المصارعة",qE:"Oldest Olympic sport?",aE:"Wrestling"},
-    {q:"كم يبلغ ارتفاع شبكة التنس؟",a:"متر تقريباً",qE:"Height of tennis net?",aE:"About 1 meter"},
-    {q:"ما الرياضة الأشهر في أمريكا؟",a:"كرة القدم الأمريكية",qE:"Most popular sport in the US?",aE:"American Football"},
-    {q:"كم يبلغ طول حمام السباحة الأولمبي؟",a:"50 متر",qE:"Length of Olympic swimming pool?",aE:"50 meters"},
-    {q:"ما اسم الكرة في رياضة الغولف؟",a:"كرة الغولف",qE:"What's the ball in golf called?",aE:"Golf ball"},
-    {q:"من أي بلد نشأت كرة القدم الحديثة؟",a:"إنجلترا",qE:"Where did modern football originate?",aE:"England"},
-  ],
-  entertainment: [
-    {q:"ما أشهر فيلم ديزني للرسوم المتحركة؟",a:"الأسد الملك",qE:"Most famous Disney animated film?",aE:"The Lion King"},
-    {q:"ما اسم روبوت حرب النجوم الشهير؟",a:"R2-D2",qE:"Famous Star Wars robot?",aE:"R2-D2"},
-    {q:"كم عدد أفلام هاري بوتر؟",a:"ثمانية",qE:"How many Harry Potter films?",aE:"Eight"},
-    {q:"ما اسم سمكة فيلم البحث عن نيمو؟",a:"نيمو",qE:"Fish in Finding Nemo?",aE:"Nemo"},
-    {q:"من بطل المهمة المستحيلة؟",a:"توم كروز",qE:"Star of Mission Impossible?",aE:"Tom Cruise"},
-    {q:"ما الاسم الحقيقي لسبايدرمان؟",a:"بيتر باركر",qE:"Spider-Man's real name?",aE:"Peter Parker"},
-    {q:"كم عدد أحجار الإنفينيتي؟",a:"ستة",qE:"How many Infinity Stones?",aE:"Six"},
-    {q:"من مخرج فيلم تايتانيك؟",a:"جيمس كاميرون",qE:"Director of Titanic?",aE:"James Cameron"},
-    {q:"ما اسم أميرة فيلم علاء الدين؟",a:"ياسمين",qE:"Princess in Aladdin?",aE:"Jasmine"},
-    {q:"ما أكثر لعبة فيديو مبيعاً في التاريخ؟",a:"ماينكرافت",qE:"Best-selling video game ever?",aE:"Minecraft"},
-    {q:"ما اسم مملكة إلسا في فروزن؟",a:"أرنديل",qE:"Elsa's kingdom in Frozen?",aE:"Arendelle"},
-    {q:"من يرتدي القناع الأسود والعباءة؟",a:"باتمان",qE:"Hero with black mask and cape?",aE:"Batman"},
-    {q:"ما الشخصية الرئيسية في لعبة ماريو؟",a:"ماريو",qE:"Main character in Mario?",aE:"Mario"},
-    {q:"ما اسم والد سيمبا في الأسد الملك؟",a:"موفاسا",qE:"Simba's father in Lion King?",aE:"Mufasa"},
-    {q:"من يلعب دور آيرون مان؟",a:"روبرت داوني جونيور",qE:"Who plays Iron Man?",aE:"Robert Downey Jr."},
-    {q:"ما اسم سلحفاة كونغ فو باندا؟",a:"أوغواي",qE:"Turtle master in Kung Fu Panda?",aE:"Oogway"},
-    {q:"ما لعبة البناء والبقاء الشهيرة؟",a:"ماينكرافت",qE:"Famous block building game?",aE:"Minecraft"},
-    {q:"من صوّت ميكي ماوس في الأصل؟",a:"والت ديزني",qE:"Who originally voiced Mickey Mouse?",aE:"Walt Disney"},
-    {q:"ما اسم ساحر هاري بوتر الشرير؟",a:"فولدمورت",qE:"Villain in Harry Potter?",aE:"Voldemort"},
-    {q:"في أي عام صدر أول فيلم أفنجرز؟",a:"2012",qE:"First Avengers movie year?",aE:"2012"},
-    {q:"ما اللعبة الشهيرة بمعركة 100 لاعب؟",a:"فورتنايت",qE:"Famous 100-player battle royale?",aE:"Fortnite"},
-    {q:"ما اسم الأخطبوط في سبونج بوب؟",a:"شفيق",qE:"Octopus in SpongeBob?",aE:"Squidward"},
-    {q:"من يلعب دور جاك في تايتانيك؟",a:"ليوناردو دي كابريو",qE:"Who plays Jack in Titanic?",aE:"Leonardo DiCaprio"},
-    {q:"ما اسم الأسد في نارنيا؟",a:"أصلان",qE:"Lion in Narnia?",aE:"Aslan"},
-    {q:"ما اسم الساحرة في فيلم حورية البحر الصغيرة؟",a:"أورسولا",qE:"Witch in The Little Mermaid?",aE:"Ursula"},
-  ],
-  technology: [
-    {q:"من أسس شركة أبل؟",a:"ستيف جوبز",qE:"Who founded Apple?",aE:"Steve Jobs"},
-    {q:"ما أشهر محرك بحث؟",a:"غوغل",qE:"Most famous search engine?",aE:"Google"},
-    {q:"من أسس فيسبوك؟",a:"مارك زوكربيرغ",qE:"Who founded Facebook?",aE:"Mark Zuckerberg"},
-    {q:"ما نظام الهواتف الأشهر؟",a:"أندرويد",qE:"Most popular mobile OS?",aE:"Android"},
-    {q:"من اخترع الويب؟",a:"تيم بيرنرز لي",qE:"Who invented the Web?",aE:"Tim Berners-Lee"},
-    {q:"ما لغة البرمجة الأشهر للويب؟",a:"جافاسكريبت",qE:"Most used web language?",aE:"JavaScript"},
-    {q:"ما أول هاتف ذكي من أبل؟",a:"آيفون",qE:"Apple's first smartphone?",aE:"iPhone"},
-    {q:"ما اسم مساعد أبل الصوتي؟",a:"سيري",qE:"Apple's voice assistant?",aE:"Siri"},
-    {q:"من أسس أمازون؟",a:"جيف بيزوس",qE:"Who founded Amazon?",aE:"Jeff Bezos"},
-    {q:"ما أشهر عملة رقمية؟",a:"بيتكوين",qE:"Most famous cryptocurrency?",aE:"Bitcoin"},
-    {q:"ما نظام تشغيل مايكروسوفت؟",a:"ويندوز",qE:"Microsoft's OS?",aE:"Windows"},
-    {q:"من أسس مايكروسوفت؟",a:"بيل غيتس",qE:"Who founded Microsoft?",aE:"Bill Gates"},
-    {q:"ما تيسلا مشهورة بتصنيعه؟",a:"سيارات كهربائية",qE:"What does Tesla make?",aE:"Electric cars"},
-    {q:"ما هو يوتيوب؟",a:"منصة فيديو",qE:"What is YouTube?",aE:"Video platform"},
-    {q:"ما اسم مساعد غوغل؟",a:"غوغل أسيستانت",qE:"Google's voice assistant?",aE:"Google Assistant"},
-    {q:"ما أشهر تطبيق تواصل في العالم العربي؟",a:"واتساب",qE:"Most popular messaging app in Arab world?",aE:"WhatsApp"},
-    {q:"من أسس تويتر؟",a:"جاك دورسي",qE:"Who founded Twitter?",aE:"Jack Dorsey"},
-    {q:"ما أشهر منصة ألعاب من سوني؟",a:"بلايستيشن",qE:"Sony's gaming platform?",aE:"PlayStation"},
-    {q:"ما هو ChatGPT؟",a:"ذكاء اصطناعي",qE:"What is ChatGPT?",aE:"AI chatbot"},
-    {q:"ما أول لغة برمجة عالية المستوى؟",a:"فورتران",qE:"First high-level programming language?",aE:"Fortran"},
-    {q:"ما المصطلح التقني لربط الأجهزة لاسلكياً قريبة؟",a:"بلوتوث",qE:"Short-range wireless tech?",aE:"Bluetooth"},
-    {q:"ما أشهر موقع تواصل مهني؟",a:"لينكد إن",qE:"Most famous professional social network?",aE:"LinkedIn"},
-    {q:"من أسس شركة تيسلا؟",a:"إيلون ماسك",qE:"Who founded Tesla?",aE:"Elon Musk"},
-    {q:"ما اسم منصة مايكروسوفت للألعاب؟",a:"إكسبوكس",qE:"Microsoft's gaming console?",aE:"Xbox"},
-    {q:"ما أشهر نظام للذكاء الاصطناعي التوليدي؟",a:"ChatGPT",qE:"Most famous generative AI?",aE:"ChatGPT"},
-  ],
-  food: [
-    {q:"ما الفاكهة الأكثر استهلاكاً؟",a:"الموز",qE:"Most consumed fruit?",aE:"Banana"},
-    {q:"من أين نشأت البيتزا؟",a:"إيطاليا",qE:"Where did pizza originate?",aE:"Italy"},
-    {q:"ما المكون الرئيسي للشوكولاتة؟",a:"الكاكاو",qE:"Main ingredient in chocolate?",aE:"Cocoa"},
-    {q:"ما الأكلة الشهيرة في اليابان؟",a:"السوشي",qE:"Famous Japanese dish?",aE:"Sushi"},
-    {q:"ما أغلى توابل في العالم؟",a:"الزعفران",qE:"Most expensive spice?",aE:"Saffron"},
-    {q:"ما يجعل الخبز ينتفخ؟",a:"الخميرة",qE:"What makes bread rise?",aE:"Yeast"},
-    {q:"ما طعام الباندا المفضل؟",a:"الخيزران",qE:"What do pandas eat?",aE:"Bamboo"},
-    {q:"ما مشروب حبوب البن؟",a:"القهوة",qE:"Drink from coffee beans?",aE:"Coffee"},
-    {q:"ما الخضرة التي تبكيك؟",a:"البصل",qE:"Vegetable that makes you cry?",aE:"Onion"},
-    {q:"من أين يُصنع السكر؟",a:"قصب السكر",qE:"Where is sugar made from?",aE:"Sugarcane"},
-    {q:"ما الجبن المستخدم في البيتزا؟",a:"موتزاريلا",qE:"Cheese on pizza?",aE:"Mozzarella"},
-    {q:"ما المادة الحلوة من النحل؟",a:"العسل",qE:"Sweet substance from bees?",aE:"Honey"},
-    {q:"من أين نشأ الهمبرغر؟",a:"ألمانيا",qE:"Where did hamburger originate?",aE:"Germany"},
-    {q:"ما الطبق الوطني للمكسيك؟",a:"التاكو",qE:"National dish of Mexico?",aE:"Taco"},
-    {q:"ما الأكلة السعودية الشهيرة؟",a:"الكبسة",qE:"Famous Saudi dish?",aE:"Kabsa"},
-    {q:"ما الفاكهة المشهورة بملكة الفواكه؟",a:"المنغوستين",qE:"Queen of fruits?",aE:"Mangosteen"},
-    {q:"ما أشهر مشروب عربي تقليدي؟",a:"القهوة العربية",qE:"Famous traditional Arab drink?",aE:"Arabic coffee"},
-    {q:"ما الطعام الإيطالي من عجين طويل؟",a:"الباستا",qE:"Italian long dough food?",aE:"Pasta"},
-    {q:"ما الفاكهة الاستوائية بقشرة شوكية؟",a:"الأناناس",qE:"Tropical fruit with spiky skin?",aE:"Pineapple"},
-    {q:"ما الطبق اللبناني المشهور من الحمص؟",a:"الحمص",qE:"Famous Lebanese chickpea dish?",aE:"Hummus"},
-    {q:"ما الفاكهة ذات القشرة الصفراء المنحنية؟",a:"الموز",qE:"Yellow curved fruit?",aE:"Banana"},
-    {q:"ما أشهر أكلة مصرية شعبية؟",a:"الكشري",qE:"Famous Egyptian street food?",aE:"Koshari"},
-    {q:"ما المشروب الغازي الأشهر عالمياً؟",a:"كوكاكولا",qE:"Most famous soda?",aE:"Coca-Cola"},
-    {q:"ما الطبق الهندي الشهير بالتوابل الحارة؟",a:"الكاري",qE:"Famous spicy Indian dish?",aE:"Curry"},
-    {q:"ما الثمرة التي تصنع منها الجواكامولي؟",a:"الأفوكادو",qE:"Fruit used to make guacamole?",aE:"Avocado"},
-  ],
-  islam: [
-    {q:"كم عدد أركان الإسلام؟",a:"خمسة",qE:"How many pillars of Islam?",aE:"Five"},
-    {q:"كم سورة في القرآن؟",a:"114",qE:"Surahs in the Quran?",aE:"114"},
-    {q:"ما أطول سورة في القرآن؟",a:"البقرة",qE:"Longest surah?",aE:"Al-Baqarah"},
-    {q:"كم صلاة مفروضة في اليوم؟",a:"خمس",qE:"Daily obligatory prayers?",aE:"Five"},
-    {q:"ما شهر الصيام؟",a:"رمضان",qE:"Month of fasting?",aE:"Ramadan"},
-    {q:"أين تقع الكعبة؟",a:"مكة",qE:"Where is the Kaaba?",aE:"Mecca"},
-    {q:"كم نبياً ذُكر في القرآن؟",a:"25",qE:"Prophets mentioned in Quran?",aE:"25"},
-    {q:"ما أول مسجد في الإسلام؟",a:"مسجد قباء",qE:"First mosque in Islam?",aE:"Quba Mosque"},
-    {q:"ما أقصر سورة في القرآن؟",a:"الكوثر",qE:"Shortest surah?",aE:"Al-Kawthar"},
-    {q:"متى كانت الهجرة النبوية؟",a:"622 ميلادي",qE:"When was the Hijra?",aE:"622 CE"},
-    {q:"ما السورة المسماة قلب القرآن؟",a:"يس",qE:"Surah called heart of Quran?",aE:"Ya-Sin"},
-    {q:"ما اسم زوجة النبي الأولى؟",a:"خديجة",qE:"Prophet's first wife?",aE:"Khadijah"},
-    {q:"ما الركن الخامس في الإسلام؟",a:"الحج",qE:"Fifth pillar of Islam?",aE:"Hajj"},
-    {q:"ما اسم أول غزوة؟",a:"بدر",qE:"First major battle in Islam?",aE:"Badr"},
-    {q:"ما الركن الثالث في الإسلام؟",a:"الزكاة",qE:"Third pillar of Islam?",aE:"Zakat"},
-    {q:"كم جزءاً في القرآن؟",a:"ثلاثون",qE:"Parts (juz) in Quran?",aE:"Thirty"},
-    {q:"ما الركن الأول في الإسلام؟",a:"الشهادتان",qE:"First pillar of Islam?",aE:"Shahada"},
-    {q:"ما اسم صلاة قبل الفجر؟",a:"قيام الليل",qE:"Prayer before Fajr?",aE:"Qiyam al-Layl (night prayer)"},
-    {q:"ما اسم الملك المسؤول عن الوحي؟",a:"جبريل",qE:"Angel of revelation?",aE:"Jibreel (Gabriel)"},
-    {q:"ما الليلة المباركة في رمضان؟",a:"ليلة القدر",qE:"Blessed night in Ramadan?",aE:"Laylat al-Qadr"},
-    {q:"كم ركعة في صلاة الظهر؟",a:"أربع",qE:"Rakahs in Dhuhr prayer?",aE:"Four"},
-    {q:"ما اسم عم النبي الذي نصره؟",a:"حمزة",qE:"Prophet's uncle who supported him?",aE:"Hamza"},
-    {q:"في أي شهر هجري يكون الحج؟",a:"ذو الحجة",qE:"Hajj month?",aE:"Dhul Hijjah"},
-    {q:"ما أول ما نزل من القرآن؟",a:"اقرأ",qE:"First word revealed in Quran?",aE:"Iqra (Read)"},
-    {q:"كم عدد الخلفاء الراشدين؟",a:"أربعة",qE:"How many Rashidun caliphs?",aE:"Four"},
-  ],
-  arabic: [
-    {q:"ما عاصمة الإمارات؟",a:"أبو ظبي",qE:"Capital of UAE?",aE:"Abu Dhabi"},
-    {q:"ما أكبر دولة عربية مساحة؟",a:"الجزائر",qE:"Largest Arab country by area?",aE:"Algeria"},
-    {q:"كم عدد الدول العربية؟",a:"22",qE:"How many Arab countries?",aE:"22"},
-    {q:"ما البحر بين مصر والسعودية؟",a:"الأحمر",qE:"Sea between Egypt and Saudi?",aE:"Red Sea"},
-    {q:"ما أصغر دولة عربية مساحة؟",a:"البحرين",qE:"Smallest Arab country?",aE:"Bahrain"},
-    {q:"ما أشهر معلم في دبي؟",a:"برج خليفة",qE:"Famous landmark in Dubai?",aE:"Burj Khalifa"},
-    {q:"ما عاصمة المغرب؟",a:"الرباط",qE:"Capital of Morocco?",aE:"Rabat"},
-    {q:"ما عملة السعودية؟",a:"الريال",qE:"Currency of Saudi Arabia?",aE:"Riyal"},
-    {q:"ما عاصمة العراق؟",a:"بغداد",qE:"Capital of Iraq?",aE:"Baghdad"},
-    {q:"ما عاصمة لبنان؟",a:"بيروت",qE:"Capital of Lebanon?",aE:"Beirut"},
-    {q:"ما عاصمة الأردن؟",a:"عمّان",qE:"Capital of Jordan?",aE:"Amman"},
-    {q:"ما عاصمة الكويت؟",a:"الكويت",qE:"Capital of Kuwait?",aE:"Kuwait City"},
-    {q:"ما عاصمة قطر؟",a:"الدوحة",qE:"Capital of Qatar?",aE:"Doha"},
-    {q:"ما عاصمة عُمان؟",a:"مسقط",qE:"Capital of Oman?",aE:"Muscat"},
-    {q:"ما أشهر أكلة عربية مشتركة؟",a:"الحمص",qE:"Shared Arab dish?",aE:"Hummus"},
-    {q:"ما عاصمة تونس؟",a:"تونس",qE:"Capital of Tunisia?",aE:"Tunis"},
-    {q:"ما عاصمة ليبيا؟",a:"طرابلس",qE:"Capital of Libya?",aE:"Tripoli"},
-    {q:"ما عاصمة السودان؟",a:"الخرطوم",qE:"Capital of Sudan?",aE:"Khartoum"},
-    {q:"ما عاصمة اليمن؟",a:"صنعاء",qE:"Capital of Yemen?",aE:"Sanaa"},
-    {q:"ما عاصمة سوريا؟",a:"دمشق",qE:"Capital of Syria?",aE:"Damascus"},
-    {q:"ما أطول برج في العالم العربي؟",a:"برج خليفة",qE:"Tallest tower in Arab world?",aE:"Burj Khalifa"},
-    {q:"ما عاصمة البحرين؟",a:"المنامة",qE:"Capital of Bahrain?",aE:"Manama"},
-    {q:"ما عاصمة الجزائر؟",a:"الجزائر",qE:"Capital of Algeria?",aE:"Algiers"},
-    {q:"ما المضيق الذي يربط الخليج العربي بخليج عمان؟",a:"هرمز",qE:"Strait connecting Persian Gulf to Gulf of Oman?",aE:"Hormuz"},
-    {q:"ما العملة الرسمية لمصر؟",a:"الجنيه المصري",qE:"Currency of Egypt?",aE:"Egyptian Pound"},
-  ],
-  literature: [
-    {q:"من كتب البؤساء؟",a:"فيكتور هوغو",qE:"Who wrote Les Misérables?",aE:"Victor Hugo"},
-    {q:"من مؤلف هاملت؟",a:"شكسبير",qE:"Who wrote Hamlet?",aE:"Shakespeare"},
-    {q:"من كتب الأمير الصغير؟",a:"سانت إكزوبيري",qE:"Who wrote The Little Prince?",aE:"Saint-Exupéry"},
-    {q:"من كتب 1984؟",a:"جورج أورويل",qE:"Who wrote 1984?",aE:"George Orwell"},
-    {q:"من مؤلف هاري بوتر؟",a:"رولينغ",qE:"Who wrote Harry Potter?",aE:"J.K. Rowling"},
-    {q:"من كتب الحرب والسلام؟",a:"تولستوي",qE:"Who wrote War and Peace?",aE:"Tolstoy"},
-    {q:"من مؤلف دون كيشوت؟",a:"سرفانتس",qE:"Who wrote Don Quixote?",aE:"Cervantes"},
-    {q:"من كتب الجريمة والعقاب؟",a:"دوستويفسكي",qE:"Who wrote Crime and Punishment?",aE:"Dostoevsky"},
-    {q:"من كتب مزرعة الحيوان؟",a:"أورويل",qE:"Who wrote Animal Farm?",aE:"Orwell"},
-    {q:"من مؤلف ألف ليلة وليلة؟",a:"مجهول",qE:"Who wrote 1001 Nights?",aE:"Unknown"},
-    {q:"من هو الشاعر أمير الشعراء؟",a:"أحمد شوقي",qE:"Prince of Poets in Arabic?",aE:"Ahmad Shawqi"},
-    {q:"من كتب المقدمة؟",a:"ابن خلدون",qE:"Who wrote The Muqaddimah?",aE:"Ibn Khaldun"},
-    {q:"من كتب مئة عام من العزلة؟",a:"ماركيز",qE:"Who wrote 100 Years of Solitude?",aE:"García Márquez"},
-    {q:"من كتب الشيخ والبحر؟",a:"همنغواي",qE:"Who wrote The Old Man and the Sea?",aE:"Hemingway"},
-    {q:"بأي لغة كُتبت الإلياذة؟",a:"اليونانية",qE:"Language of the Iliad?",aE:"Greek"},
-    {q:"من كتب كليلة ودمنة بالعربية؟",a:"ابن المقفع",qE:"Arabic translator of Kalila and Dimna?",aE:"Ibn al-Muqaffa"},
-    {q:"من مؤلف البخلاء؟",a:"الجاحظ",qE:"Who wrote Al-Bukhala (The Misers)?",aE:"Al-Jahiz"},
-    {q:"من كتب لا تحزن؟",a:"عائض القرني",qE:"Who wrote Don't Be Sad?",aE:"Aaidh al-Qarni"},
-    {q:"من كتب رواية العجوز والبحر؟",a:"همنغواي",qE:"Who wrote The Old Man and the Sea?",aE:"Hemingway"},
-    {q:"ما أشهر مسرحيات شكسبير التراجيدية؟",a:"هاملت",qE:"Shakespeare's most famous tragedy?",aE:"Hamlet"},
-    {q:"من كتب رواية الخيميائي؟",a:"باولو كويلو",qE:"Who wrote The Alchemist?",aE:"Paulo Coelho"},
-    {q:"من كتب رحلة ابن بطوطة؟",a:"ابن بطوطة",qE:"Who wrote the Rihla?",aE:"Ibn Battuta"},
-    {q:"من مؤلف روميو وجولييت؟",a:"شكسبير",qE:"Who wrote Romeo and Juliet?",aE:"Shakespeare"},
-    {q:"من كتب البؤساء بالفرنسية؟",a:"فيكتور هوغو",qE:"Who wrote Les Misérables in French?",aE:"Victor Hugo"},
-    {q:"من كتب رواية أنا كارنينا؟",a:"تولستوي",qE:"Who wrote Anna Karenina?",aE:"Tolstoy"},
-  ],
-  animals: [
-    {q:"ما أكبر حيوان بري؟",a:"الفيل الأفريقي",qE:"Largest land animal?",aE:"African elephant"},
-    {q:"ما الحيوان الذي ينام واقفاً؟",a:"الحصان",qE:"Animal that sleeps standing?",aE:"Horse"},
-    {q:"كم رجل للعنكبوت؟",a:"ثمانية",qE:"How many legs does a spider have?",aE:"Eight"},
-    {q:"ما الطائر الوحيد الذي يطير للخلف؟",a:"الطنان",qE:"Only bird that flies backwards?",aE:"Hummingbird"},
-    {q:"ما الحيوان الذي لا يشرب الماء أبداً؟",a:"الكوالا",qE:"Animal that rarely drinks water?",aE:"Koala"},
-    {q:"كم قلب للأخطبوط؟",a:"ثلاثة",qE:"How many hearts does an octopus have?",aE:"Three"},
-    {q:"ما أسرع طائر في العالم؟",a:"الشاهين",qE:"Fastest bird?",aE:"Peregrine falcon"},
-    {q:"ما الحيوان الذي يغير لونه؟",a:"الحرباء",qE:"Animal that changes color?",aE:"Chameleon"},
-    {q:"كم سنة يعيش السلحفاة تقريباً؟",a:"أكثر من 100",qE:"How long can a tortoise live?",aE:"Over 100 years"},
-    {q:"ما أذكى حيوان بعد الإنسان؟",a:"الدلفين",qE:"Smartest animal after humans?",aE:"Dolphin"},
-    {q:"ما الحيوان المعروف بملك الغابة؟",a:"الأسد",qE:"King of the jungle?",aE:"Lion"},
-    {q:"كم عدد أرجل النملة؟",a:"ستة",qE:"How many legs does an ant have?",aE:"Six"},
-    {q:"ما أكبر طائر في العالم؟",a:"النعامة",qE:"Largest bird?",aE:"Ostrich"},
-    {q:"ما الحيوان الذي يحمل بيته على ظهره؟",a:"السلحفاة",qE:"Animal that carries its home?",aE:"Turtle/Tortoise"},
-    {q:"ما أطول حيوان بحري؟",a:"الحوت الأزرق",qE:"Longest marine animal?",aE:"Blue whale"},
-    {q:"ما الحيوان الذي يُنتج الحرير؟",a:"دودة القز",qE:"Animal that produces silk?",aE:"Silkworm"},
-    {q:"ما الحيوان ذو الرقبة الأطول؟",a:"الزرافة",qE:"Animal with the longest neck?",aE:"Giraffe"},
-    {q:"ما الحشرة التي تصنع العسل؟",a:"النحلة",qE:"Insect that makes honey?",aE:"Bee"},
-    {q:"كم سن للقرش تقريباً؟",a:"3000",qE:"Approximate teeth of a shark?",aE:"Around 3000"},
-    {q:"ما الحيوان الذي يعيش في القطب الجنوبي؟",a:"البطريق",qE:"Animal living in Antarctica?",aE:"Penguin"},
-    {q:"ما الحيوان الأبطأ في العالم؟",a:"الكسلان",qE:"Slowest animal?",aE:"Sloth"},
-    {q:"ما الحيوان الذي يستطيع الطيران والسباحة؟",a:"البطريق لا يطير لكن البط يفعل الاثنين",qE:"Animal that can fly and swim?",aE:"Duck"},
-    {q:"ما صوت الأسد؟",a:"زئير",qE:"Sound of a lion?",aE:"Roar"},
-    {q:"ما الحيوان الذي يعيش في الماء ولا يتنفس تحته؟",a:"الحوت",qE:"Marine mammal that breathes air?",aE:"Whale"},
-    {q:"ما الحيوان الذي يملك أكبر عيون؟",a:"الحبار العملاق",qE:"Animal with the largest eyes?",aE:"Giant squid"},
-  ],
-  flags: [
-    {q:"أي دولة علمها أخضر فقط؟",a:"ليبيا (القديم)",qE:"Country with an all-green flag (historical)?",aE:"Libya (old flag)"},
-    {q:"ما الدولة التي علمها يحمل نجمة داوود؟",a:"إسرائيل",qE:"Country with Star of David on flag?",aE:"Israel"},
-    {q:"أي دولة علمها أحمر بدائرة بيضاء؟",a:"اليابان",qE:"Country with red circle on white?",aE:"Japan"},
-    {q:"ما الدولة التي علمها ورقة شجرة القيقب؟",a:"كندا",qE:"Country with maple leaf flag?",aE:"Canada"},
-    {q:"أي دولة علمها به نجمة وهلال؟",a:"تركيا",qE:"Country with star and crescent?",aE:"Turkey"},
-    {q:"ما لون علم فرنسا؟",a:"أزرق أبيض أحمر",qE:"Colors of French flag?",aE:"Blue, white, red"},
-    {q:"أي دولة علمها مثلث أزرق ونجوم؟",a:"الولايات المتحدة",qE:"Country with blue triangle and stars?",aE:"United States"},
-    {q:"ما الدولة التي علمها يحمل تنيناً أحمر؟",a:"ويلز",qE:"Country with red dragon on flag?",aE:"Wales"},
-    {q:"أي دولة علمها أخضر أبيض برتقالي؟",a:"إيرلندا",qE:"Country with green white orange flag?",aE:"Ireland"},
-    {q:"ما الدولة التي علمها به صليب أبيض على أحمر؟",a:"سويسرا",qE:"Country with white cross on red?",aE:"Switzerland"},
-    {q:"أي دولة عربية علمها أسود أبيض أخضر مع مثلث أحمر؟",a:"الأردن",qE:"Arab country with black, white, green and red triangle?",aE:"Jordan"},
-    {q:"ما الدولة التي علمها يحمل نسراً؟",a:"مصر",qE:"Country with eagle on flag?",aE:"Egypt"},
-    {q:"أي دولة علمها أصفر أزرق أحمر أفقي؟",a:"كولومبيا",qE:"Country with yellow blue red horizontal?",aE:"Colombia"},
-    {q:"ما الدولة التي علمها دائرة خضراء على أصفر؟",a:"البرازيل",qE:"Country with green diamond on yellow?",aE:"Brazil"},
-    {q:"أي دولة علمها نجمتان فقط؟",a:"سوريا",qE:"Country with exactly two stars on flag?",aE:"Syria"},
-    {q:"ما اللون المشترك في معظم الأعلام العربية؟",a:"الأخضر",qE:"Common color in most Arab flags?",aE:"Green"},
-    {q:"أي دولة علمها به شعار السيفين والنخلة؟",a:"السعودية",qE:"Flag with two swords and palm tree?",aE:"Saudi Arabia"},
-    {q:"ما الدولة التي علمها أزرق ونجمة بيضاء؟",a:"الصومال",qE:"Blue flag with white star?",aE:"Somalia"},
-    {q:"أي دولة علمها يحمل شمساً صفراء؟",a:"الأرجنتين",qE:"Country with yellow sun on flag?",aE:"Argentina"},
-    {q:"ما الدولة ذات العلم الأحمر بنجمة خضراء؟",a:"المغرب",qE:"Red flag with green star?",aE:"Morocco"},
-    {q:"أي دولة آسيوية علمها برتقالي أبيض أخضر؟",a:"الهند",qE:"Asian country with orange white green flag?",aE:"India"},
-    {q:"ما الدولة التي علمها يحمل أسداً؟",a:"سريلانكا",qE:"Country with lion on flag?",aE:"Sri Lanka"},
-    {q:"أي دولة أوروبية علمها أزرق بنجوم صفراء؟",a:"الاتحاد الأوروبي",qE:"Blue flag with yellow stars (not a country)?",aE:"European Union"},
-    {q:"ما الدولة التي علمها مربعات حمراء وبيضاء؟",a:"كرواتيا",qE:"Country with red and white checkered flag?",aE:"Croatia"},
-    {q:"أي دولة علمها يحتوي على خريطتها؟",a:"قبرص",qE:"Country with its map on the flag?",aE:"Cyprus"},
-  ],
-};
+  const app = express();
+  const server = http.createServer(app);
+  const io = new Server(server);
+  app.use(express.static(path.join(__dirname, 'public')));
 
-function genCode() {
-  const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let s = '';
-  for (let i = 0; i < 5; i++) s += c[Math.floor(Math.random() * c.length)];
-  return s;
-}
+  const rooms = new Map();
 
-function createRoom(hostId, name, avatar) {
-  let code;
-  do { code = genCode(); } while (rooms.has(code));
-  const room = {
-    code, hostId,
-    players: new Map(),
-    state: 'lobby',
-    settings: { categories: ['general'], rounds: 5, answerTime: 30, voteTime: 20, lang: 'ar', maxPlayers: 12 },
-    currentRound: 0, currentQuestion: null,
-    answers: new Map(), votes: new Map(), scores: new Map(),
-    usedQuestions: new Set(), timer: null, timerPaused: false, timeLeft: 0,
-    kicked: new Set(), chat: [],
-    pickerIndex: 0,
+  // Every async callback goes through this so one bad event can't take the process down.
+  const safe = (label, fn) => (...args) => {
+    try { return fn(...args); } catch (e) { log(`${label} failed:`, e); }
   };
-  room.players.set(hostId, { name, avatar, connected: true });
-  room.scores.set(hostId, 0);
-  rooms.set(code, room);
-  return room;
-}
 
-function getQ(room, category) {
-  const pool = QUESTIONS[category] || [];
-  const avail = [];
-  for (let i = 0; i < pool.length; i++) {
-    const k = `${category}-${i}`;
-    if (!room.usedQuestions.has(k)) avail.push({ ...pool[i], key: k, category });
+  const channel = room => `room:${room.code}`;
+  const newId = () => crypto.randomBytes(8).toString('hex');
+
+  function genCode() {
+    let code;
+    do {
+      code = '';
+      for (let i = 0; i < 5; i++) code += CODE_CHARS[crypto.randomInt(CODE_CHARS.length)];
+    } while (rooms.has(code));
+    return code;
   }
-  if (avail.length === 0) {
-    pool.forEach((_, i) => room.usedQuestions.delete(`${category}-${i}`));
-    return getQ(room, category);
+
+  function createRoom(lang) {
+    const settings = L.sanitizeSettings(L.DEFAULT_SETTINGS, { lang });
+    const room = {
+      code: genCode(), hostId: null, players: new Map(), state: 'lobby', settings,
+      round: 0, pickerIndex: 0, pickerId: null, pickCats: [], question: null,
+      answers: new Map(), votes: new Map(), options: null, names: new Map(),
+      usedQuestions: new Set(), timer: null, advanceTimer: null, timeLeft: 0, timeMax: 0,
+      kicked: new Set(), chat: [], lastResults: null, lastEnd: null,
+    };
+    rooms.set(room.code, room);
+    return room;
   }
-  const pick = avail[Math.floor(Math.random() * avail.length)];
-  room.usedQuestions.add(pick.key);
-  return pick;
-}
 
-function active(room) { return [...room.players.entries()].filter(([, p]) => p.connected); }
+  const connected = room => [...room.players.values()].filter(p => p.connected);
 
-function roomState(room) {
-  const players = [];
-  for (const [id, p] of room.players)
-    players.push({ id, name: p.name, avatar: p.avatar, score: room.scores.get(id) || 0, connected: p.connected });
-  players.sort((a, b) => b.score - a.score);
-  const activePlayers = active(room);
-  const pickerIdx = room.pickerIndex % activePlayers.length;
-  return {
-    code: room.code, hostId: room.hostId, state: room.state, settings: room.settings,
-    players, currentRound: room.currentRound, totalRounds: room.settings.rounds,
-    timeLeft: room.timeLeft, timerPaused: room.timerPaused,
-    pickerId: activePlayers[pickerIdx]?.[0] || null,
-  };
-}
-
-function broadcast(room) {
-  const s = roomState(room);
-  for (const [id] of room.players) io.to(id).emit('room:state', s);
-}
-
-function setTimer(room, dur, onTick, onEnd) {
-  clearInterval(room.timer);
-  room.timeLeft = dur; room.timerPaused = false;
-  room._onTick = onTick; room._onEnd = onEnd;
-  onTick(dur);
-  room.timer = setInterval(() => {
-    if (room.timerPaused) return;
-    room.timeLeft--;
-    onTick(room.timeLeft);
-    if (room.timeLeft <= 0) { clearInterval(room.timer); room.timer = null; onEnd(); }
-  }, 1000);
-}
-
-function startCategoryPick(room) {
-  room.currentRound++;
-  room.answers.clear();
-  room.votes.clear();
-  room.state = 'picking';
-  const ap = active(room);
-  const pickerIdx = room.pickerIndex % ap.length;
-  const pickerId = ap[pickerIdx][0];
-  room.pickerIndex++;
-  for (const [id] of room.players) {
-    io.to(id).emit('game:pick', {
-      pickerId,
-      pickerName: room.players.get(pickerId)?.name,
-      pickerAvatar: room.players.get(pickerId)?.avatar,
-      categories: room.settings.categories,
-      round: room.currentRound,
-      totalRounds: room.settings.rounds,
-    });
-  }
-  room._pickerId = pickerId;
-  setTimer(room, 15,
-    t => { for (const [id] of room.players) io.to(id).emit('timer:update', t); },
-    () => {
-      const cats = room.settings.categories;
-      startQuestion(room, cats[Math.floor(Math.random() * cats.length)]);
-    }
-  );
-}
-
-function startQuestion(room, category) {
-  clearInterval(room.timer);
-  room.state = 'question';
-  room._roundStart = Date.now();
-  const q = getQ(room, category);
-  room.currentQuestion = q;
-  const lang = room.settings.lang;
-  for (const [id] of room.players) {
-    io.to(id).emit('game:question', {
-      question: lang === 'ar' ? q.q : q.qE,
-      category: q.category,
-      round: room.currentRound,
-      totalRounds: room.settings.rounds,
-    });
-  }
-  setTimer(room, room.settings.answerTime,
-    t => { for (const [id] of room.players) io.to(id).emit('timer:update', t); },
-    () => startVoting(room)
-  );
-}
-
-function startVoting(room) {
-  room.state = 'voting';
-  const lang = room.settings.lang;
-  const correct = lang === 'ar' ? room.currentQuestion.a : room.currentQuestion.aE;
-  const opts = [{ text: correct, pid: '__correct__' }];
-  for (const [pid, ans] of room.answers) {
-    if (ans.trim().toLowerCase() !== correct.trim().toLowerCase())
-      opts.push({ text: ans, pid });
-  }
-  for (let i = opts.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [opts[i], opts[j]] = [opts[j], opts[i]];
-  }
-  room._voteOpts = opts;
-  const safe = opts.map((o, i) => ({ text: o.text, id: i }));
-  for (const [id] of room.players) {
-    io.to(id).emit('game:vote', { options: safe, round: room.currentRound, totalRounds: room.settings.rounds });
-  }
-  broadcast(room);
-  setTimer(room, room.settings.voteTime,
-    t => { for (const [id] of room.players) io.to(id).emit('timer:update', t); },
-    () => showResults(room)
-  );
-}
-
-function showResults(room) {
-  clearInterval(room.timer);
-  room.state = 'results';
-  const lang = room.settings.lang;
-  const correct = lang === 'ar' ? room.currentQuestion.a : room.currentQuestion.aE;
-  const opts = room._voteOpts;
-  const rs = new Map();
-  for (const [id] of room.players) rs.set(id, { correct: false, fooled: 0, points: 0, answer: null });
-  for (const [pid, ans] of room.answers) { const r = rs.get(pid); if (r) r.answer = ans; }
-
-  for (const [vid, vi] of room.votes) {
-    const chosen = opts[vi]; if (!chosen) continue;
-    if (chosen.pid === '__correct__') {
-      const r = rs.get(vid); if (r) { r.correct = true; r.points += 2; }
-    } else if (chosen.pid !== vid) {
-      const r = rs.get(chosen.pid); if (r) { r.fooled++; r.points += 1; }
-    }
-  }
-  for (const [id, r] of rs) room.scores.set(id, (room.scores.get(id) || 0) + r.points);
-
-  const names = {}, avatars = {};
-  for (const [id, p] of room.players) { names[id] = p.name; avatars[id] = p.avatar; }
-  const voteMap = {};
-  for (const [v, i] of room.votes) voteMap[v] = i;
-
-  const data = {
-    correctAnswer: correct,
-    options: opts.map(o => ({ text: o.text, pid: o.pid, name: o.pid === '__correct__' ? null : names[o.pid], avatar: o.pid === '__correct__' ? null : avatars[o.pid] })),
-    votes: voteMap, roundScores: {}, totalScores: {}, names, avatars,
-  };
-  for (const [id, r] of rs) data.roundScores[id] = r;
-  for (const [id] of room.players) data.totalScores[id] = room.scores.get(id) || 0;
-  for (const [id] of room.players) io.to(id).emit('game:results', data);
-  broadcast(room);
-}
-
-function endGame(room) {
-  clearInterval(room.timer);
-  room.state = 'finished';
-  const players = [];
-  for (const [id, p] of room.players)
-    players.push({ id, name: p.name, avatar: p.avatar, score: room.scores.get(id) || 0 });
-  players.sort((a, b) => b.score - a.score);
-  for (const [id] of room.players) io.to(id).emit('game:end', { players });
-  broadcast(room);
-}
-
-io.on('connection', (socket) => {
-  let curRoom = null;
-
-  socket.on('room:create', (data, cb) => {
-    const { name, avatar } = data || {};
-    if (typeof cb !== 'function' || typeof name !== 'string' || !name.trim()) return;
-    const room = createRoom(socket.id, name, avatar);
-    curRoom = room.code; socket.join(room.code);
-    cb({ success: true, code: room.code }); broadcast(room);
-  });
-
-  socket.on('room:join', (data, cb) => {
-    const { code, name, avatar } = data || {};
-    if (typeof cb !== 'function') return;
-    if (typeof code !== 'string' || typeof name !== 'string' || !name.trim()) return cb({ success: false, error: 'Invalid input' });
-    const room = rooms.get(code.toUpperCase());
-    if (!room) return cb({ success: false, error: 'Room not found' });
-    if (room.kicked.has(name.toLowerCase())) return cb({ success: false, error: 'You were kicked' });
-    if (room.state !== 'lobby') return cb({ success: false, error: 'Game already started' });
-    if (room.players.size >= room.settings.maxPlayers) return cb({ success: false, error: 'Room full' });
-    room.players.set(socket.id, { name, avatar, connected: true });
-    room.scores.set(socket.id, 0);
-    curRoom = room.code; socket.join(room.code);
-    cb({ success: true, code: room.code }); broadcast(room);
-    for (const [id] of room.players) io.to(id).emit('chat:msg', { t: 'sys', text: `${name} joined` });
-  });
-
-  socket.on('room:settings', s => {
-    if (!curRoom) return; const room = rooms.get(curRoom);
-    if (!room || room.hostId !== socket.id) return;
-    Object.assign(room.settings, s); broadcast(room);
-  });
-
-  socket.on('game:start', () => {
-    if (!curRoom) return; const room = rooms.get(curRoom);
-    if (!room || room.hostId !== socket.id) return;
-    if (active(room).length < 2) return io.to(socket.id).emit('error', 'Need 2+ players');
-    room.currentRound = 0; room.pickerIndex = 0;
-    for (const [id] of room.players) room.scores.set(id, 0);
-    room.usedQuestions.clear();
-    startCategoryPick(room); broadcast(room);
-  });
-
-  socket.on('game:pickCategory', cat => {
-    if (!curRoom) return; const room = rooms.get(curRoom);
-    if (!room || room.state !== 'picking') return;
-    if (socket.id !== room._pickerId) return;
-    if (!room.settings.categories.includes(cat)) return;
-    clearInterval(room.timer);
-    startQuestion(room, cat);
-  });
-
-  socket.on('game:answer', ans => {
-    if (!curRoom) return; const room = rooms.get(curRoom);
-    if (!room || room.state !== 'question' || typeof ans !== 'string' || !ans.trim()) return;
-    room.answers.set(socket.id, ans);
-    const c = room.answers.size, tot = active(room).length;
-    for (const [id] of room.players) io.to(id).emit('game:answered', { count: c, total: tot });
-    if (c >= tot) { clearInterval(room.timer); setTimeout(() => { if (room.state === 'question') startVoting(room); }, 500); }
-  });
-
-  socket.on('game:vote', vi => {
-    if (!curRoom) return; const room = rooms.get(curRoom);
-    if (!room || room.state !== 'voting') return;
-    room.votes.set(socket.id, vi);
-    const c = room.votes.size, tot = active(room).length;
-    for (const [id] of room.players) io.to(id).emit('game:voted', { count: c, total: tot });
-    if (c >= tot) { clearInterval(room.timer); setTimeout(() => { if (room.state === 'voting') showResults(room); }, 500); }
-  });
-
-  socket.on('game:next', () => {
-    if (!curRoom) return; const room = rooms.get(curRoom);
-    if (!room || room.hostId !== socket.id) return;
-    if (room.currentRound >= room.settings.rounds) endGame(room);
-    else { startCategoryPick(room); broadcast(room); }
-  });
-
-  socket.on('game:restart', () => {
-    if (!curRoom) return; const room = rooms.get(curRoom);
-    if (!room || room.hostId !== socket.id) return;
-    room.state = 'lobby'; room.currentRound = 0; room.pickerIndex = 0;
-    for (const [id] of room.players) room.scores.set(id, 0);
-    room.usedQuestions.clear(); broadcast(room);
-  });
-
-  socket.on('chat:send', text => {
-    if (!curRoom || typeof text !== 'string') return; const room = rooms.get(curRoom); if (!room) return;
-    const p = room.players.get(socket.id); if (!p) return;
-    const m = { t: 'p', name: p.name, avatar: p.avatar, text: text.slice(0, 200) };
+  function emitAll(room, ev, data) { io.to(channel(room)).emit(ev, data); }
+  function emitTo(player, ev, data) { if (player.connected && player.socketId) io.to(player.socketId).emit(ev, data); }
+  function sys(room, key, name) {
+    const m = { t: 'sys', key, name };
     room.chat.push(m); if (room.chat.length > 100) room.chat.shift();
-    for (const [id] of room.players) io.to(id).emit('chat:msg', m);
-  });
+    emitAll(room, 'chat:msg', m);
+  }
 
-  socket.on('debug:kick', pid => {
-    if (!curRoom) return; const room = rooms.get(curRoom);
-    if (!room || room.hostId !== socket.id || pid === socket.id) return;
-    const p = room.players.get(pid); if (!p) return;
-    room.kicked.add(p.name.toLowerCase());
-    room.players.delete(pid); room.scores.delete(pid);
-    io.to(pid).emit('kicked');
-    for (const [id] of room.players) io.to(id).emit('chat:msg', { t: 'sys', text: `${p.name} was kicked` });
+  function roomState(room) {
+    const players = [...room.players.values()].map(p => ({
+      id: p.id, name: p.name, avatar: p.avatar, score: p.score, connected: p.connected,
+    }));
+    return {
+      code: room.code, hostId: room.hostId, state: room.state, settings: room.settings,
+      players: L.rankPlayers(players), round: room.round, totalRounds: room.settings.rounds,
+      pickerId: room.state === 'picking' ? room.pickerId : null,
+    };
+  }
+  const broadcast = room => emitAll(room, 'room:state', roomState(room));
+
+  // ---------- timers ----------
+  function clearTimers(room) {
+    clearInterval(room.timer); room.timer = null;
+    clearTimeout(room.advanceTimer); room.advanceTimer = null;
+  }
+
+  function setTimer(room, seconds, onEnd) {
+    clearTimers(room);
+    room.timeLeft = seconds; room.timeMax = seconds;
+    emitAll(room, 'timer:update', { left: seconds, max: seconds });
+    room.timer = setInterval(safe('timer', () => {
+      room.timeLeft--;
+      emitAll(room, 'timer:update', { left: room.timeLeft, max: room.timeMax });
+      if (room.timeLeft <= 0) { clearTimers(room); onEnd(); }
+    }), 1000);
+  }
+
+  // Move on shortly once everyone connected has acted (lets the last client see its tick).
+  function advanceSoon(room, fromState, fn) {
+    if (room.advanceTimer) return;
+    clearInterval(room.timer); room.timer = null;
+    room.advanceTimer = setTimeout(safe('advance', () => {
+      room.advanceTimer = null;
+      if (room.state === fromState) fn();
+    }), advanceDelayMs);
+  }
+
+  // ---------- phase payloads (also re-sent to players who reconnect) ----------
+  const questionText = room => (room.settings.lang === 'ar' ? room.question.q : room.question.qE);
+  const realText = room => (room.settings.lang === 'ar' ? room.question.a : room.question.aE);
+
+  function pickPayload(room) {
+    const picker = room.players.get(room.pickerId);
+    return {
+      pickerId: room.pickerId, pickerName: picker?.name ?? null, pickerAvatar: picker?.avatar ?? null,
+      categories: room.pickCats, round: room.round, totalRounds: room.settings.rounds,
+    };
+  }
+
+  function questionPayload(room, pid) {
+    return {
+      question: questionText(room), category: room.question.category,
+      round: room.round, totalRounds: room.settings.rounds,
+      answered: room.answers.has(pid), myAnswer: room.answers.get(pid) ?? null,
+    };
+  }
+
+  function votePayload(room, pid) {
+    return {
+      question: questionText(room), round: room.round, totalRounds: room.settings.rounds,
+      options: room.options.map((o, i) => ({ id: i, text: o.text, own: o.authors.includes(pid) })),
+      voted: room.votes.has(pid) ? room.votes.get(pid) : null,
+    };
+  }
+
+  function progressCounts(room, map) {
+    const conn = connected(room);
+    return { count: conn.filter(p => map.has(p.id)).length, total: conn.length };
+  }
+
+  function sendPhase(room, player) {
+    if (room.state === 'picking') emitTo(player, 'game:pick', pickPayload(room));
+    else if (room.state === 'question') {
+      emitTo(player, 'game:question', questionPayload(room, player.id));
+      emitTo(player, 'game:answered', progressCounts(room, room.answers));
+    } else if (room.state === 'voting') {
+      emitTo(player, 'game:vote', votePayload(room, player.id));
+      emitTo(player, 'game:voted', progressCounts(room, room.votes));
+    } else if (room.state === 'results' && room.lastResults) emitTo(player, 'game:results', room.lastResults);
+    else if (room.state === 'finished' && room.lastEnd) emitTo(player, 'game:end', room.lastEnd);
+    if (['picking', 'question', 'voting'].includes(room.state) && room.timer) {
+      emitTo(player, 'timer:update', { left: room.timeLeft, max: room.timeMax });
+    }
+  }
+
+  // ---------- game flow ----------
+  function startRound(room) {
+    clearTimers(room);
+    const cats = L.availableCategories(room.usedQuestions, room.settings.categories);
+    if (room.round >= room.settings.rounds || cats.length === 0) return endGame(room, cats.length ? 'rounds' : 'no_questions');
+    room.round++;
+    room.answers.clear(); room.votes.clear(); room.options = null; room.question = null; room.lastResults = null;
+    room.state = 'picking';
+    room.pickCats = cats;
+    const conn = connected(room);
+    const picker = conn.length ? conn[room.pickerIndex % conn.length] : null;
+    room.pickerIndex++;
+    room.pickerId = picker ? picker.id : null;
     broadcast(room);
-  });
+    emitAll(room, 'game:pick', pickPayload(room));
+    if (!picker) return startQuestion(room, cats[Math.floor(Math.random() * cats.length)]);
+    setTimer(room, PICK_TIME, () => startQuestion(room, cats[Math.floor(Math.random() * cats.length)]));
+  }
 
-  socket.on('debug:getAnswers', (_, cb) => {
-    if (!curRoom || typeof cb !== 'function') return;
-    const room = rooms.get(curRoom);
-    if (!room || room.hostId !== socket.id) return;
-    const ans = {};
-    for (const [id, a] of room.answers) { const p = room.players.get(id); ans[id] = { name: p?.name, avatar: p?.avatar, answer: a }; }
-    const lang = room.settings.lang;
-    cb({ answers: ans, correct: room.currentQuestion ? (lang === 'ar' ? room.currentQuestion.a : room.currentQuestion.aE) : null });
-  });
-
-  socket.on('debug:skip', () => {
-    if (!curRoom) return; const room = rooms.get(curRoom);
-    if (!room || room.hostId !== socket.id) return;
-    clearInterval(room.timer);
-    if (room.state === 'picking') { const cats = room.settings.categories; startQuestion(room, cats[Math.floor(Math.random() * cats.length)]); }
-    else if (room.state === 'question') startVoting(room);
-    else if (room.state === 'voting') showResults(room);
-  });
-
-  socket.on('debug:pause', () => {
-    if (!curRoom) return; const room = rooms.get(curRoom);
-    if (!room || room.hostId !== socket.id) return;
-    room.timerPaused = !room.timerPaused;
-    for (const [id] of room.players) io.to(id).emit('timer:paused', room.timerPaused);
+  function startQuestion(room, category) {
+    clearTimers(room);
+    const q = L.pickQuestion(room.usedQuestions, room.settings.categories, category);
+    if (!q) return endGame(room, 'no_questions');
+    room.question = q;
+    room.state = 'question';
     broadcast(room);
-  });
+    for (const p of connected(room)) emitTo(p, 'game:question', questionPayload(room, p.id));
+    emitAll(room, 'game:answered', progressCounts(room, room.answers));
+    setTimer(room, room.settings.answerTime, () => startVoting(room));
+  }
 
-  socket.on('debug:endGame', () => {
-    if (!curRoom) return; const room = rooms.get(curRoom);
-    if (!room || room.hostId !== socket.id) return;
-    clearInterval(room.timer); endGame(room);
-  });
-
-  socket.on('debug:addRounds', n => {
-    if (!curRoom) return; const room = rooms.get(curRoom);
-    if (!room || room.hostId !== socket.id) return;
-    room.settings.rounds += n; broadcast(room);
-  });
-
-  socket.on('debug:transferHost', pid => {
-    if (!curRoom) return; const room = rooms.get(curRoom);
-    if (!room || room.hostId !== socket.id) return;
-    if (room.players.has(pid)) { room.hostId = pid; broadcast(room); }
-  });
-
-  socket.on('disconnect', () => {
-    if (!curRoom) return; const room = rooms.get(curRoom); if (!room) return;
-    const p = room.players.get(socket.id); if (p) p.connected = false;
-    const conn = active(room);
-    if (conn.length === 0) { clearInterval(room.timer); rooms.delete(curRoom); return; }
-    if (room.hostId === socket.id) { room.hostId = conn[0][0]; }
+  function startVoting(room) {
+    clearTimers(room);
+    room.state = 'voting';
+    const groups = L.groupAnswers(room.answers, room.question);
+    room.options = L.shuffle([{ text: realText(room), correct: true, authors: [] },
+      ...groups.map(g => ({ text: g.text, correct: false, authors: g.authors }))]);
     broadcast(room);
-  });
-});
+    for (const p of connected(room)) emitTo(p, 'game:vote', votePayload(room, p.id));
+    emitAll(room, 'game:voted', progressCounts(room, room.votes));
+    setTimer(room, room.settings.voteTime, () => showResults(room));
+  }
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`http://localhost:${PORT}`));
+  function showResults(room) {
+    clearTimers(room);
+    room.state = 'results';
+    const ids = [...room.players.keys()];
+    const rs = L.scoreRound(ids, room.options, room.votes);
+    for (const [id, r] of rs) {
+      const p = room.players.get(id);
+      if (p) p.score += r.points;
+      r.answer = room.answers.get(id) ?? null;
+    }
+    const who = id => ({ id, name: room.names.get(id)?.name ?? '?', avatar: room.names.get(id)?.avatar ?? '?' });
+    const players = L.rankPlayers([...room.players.values()].map(p => ({ id: p.id, name: p.name, avatar: p.avatar, score: p.score })));
+    room.lastResults = {
+      question: questionText(room), correctAnswer: realText(room),
+      round: room.round, totalRounds: room.settings.rounds,
+      isLast: room.round >= room.settings.rounds || L.availableCategories(room.usedQuestions, room.settings.categories).length === 0,
+      options: room.options.map((o, i) => ({
+        text: o.text, correct: o.correct, authors: o.authors.map(who),
+        voters: [...room.votes].filter(([, vi]) => vi === i).map(([vid]) => who(vid)),
+      })),
+      roundScores: Object.fromEntries(rs), players,
+    };
+    broadcast(room);
+    emitAll(room, 'game:results', room.lastResults);
+  }
+
+  function endGame(room, reason = 'rounds') {
+    clearTimers(room);
+    room.state = 'finished';
+    room.pickerId = null;
+    const players = [...room.players.values()].map(p => ({ id: p.id, name: p.name, avatar: p.avatar, score: p.score }));
+    room.lastEnd = { players: L.rankPlayers(players), reason };
+    broadcast(room);
+    emitAll(room, 'game:end', room.lastEnd);
+  }
+
+  /** Called whenever someone acts or leaves: advance if nobody connected is left to wait for. */
+  function checkProgress(room) {
+    const conn = connected(room);
+    if (room.state === 'picking') {
+      const picker = room.players.get(room.pickerId);
+      if (!picker || !picker.connected) {
+        const cats = room.pickCats;
+        startQuestion(room, cats[Math.floor(Math.random() * cats.length)]);
+      }
+    } else if (room.state === 'question') {
+      emitAll(room, 'game:answered', progressCounts(room, room.answers));
+      if (conn.length && conn.every(p => room.answers.has(p.id))) advanceSoon(room, 'question', () => startVoting(room));
+    } else if (room.state === 'voting') {
+      emitAll(room, 'game:voted', progressCounts(room, room.votes));
+      if (conn.length && conn.every(p => room.votes.has(p.id))) advanceSoon(room, 'voting', () => showResults(room));
+    }
+  }
+
+  function ensureHost(room) {
+    const host = room.players.get(room.hostId);
+    if (host && host.connected) return false;
+    const next = connected(room)[0] || (!host && room.players.values().next().value);
+    if (!next || next.id === room.hostId) return false;
+    room.hostId = next.id;
+    return true;
+  }
+
+  // ---------- seats ----------
+  function attach(socket, room, player) {
+    if (player.socketId && player.socketId !== socket.id) {
+      const old = io.sockets.sockets.get(player.socketId);
+      if (old) {
+        old.data.roomCode = null; old.data.playerId = null;
+        old.leave(channel(room));
+        old.emit('session:replaced');
+        old.disconnect(true);
+      }
+    }
+    if (socket.data.roomCode && (socket.data.roomCode !== room.code || socket.data.playerId !== player.id)) leave(socket, 'left');
+    clearTimeout(player.graceTimer); player.graceTimer = null;
+    const wasOffline = !player.connected;
+    player.socketId = socket.id; player.connected = true;
+    socket.data.roomCode = room.code; socket.data.playerId = player.id;
+    socket.join(channel(room));
+    ensureHost(room);
+    return wasOffline;
+  }
+
+  function removePlayer(room, id, reason) {
+    const p = room.players.get(id);
+    if (!p) return;
+    clearTimeout(p.graceTimer);
+    room.players.delete(id);
+    const s = p.socketId && io.sockets.sockets.get(p.socketId);
+    if (s) { s.leave(channel(room)); s.data.roomCode = null; s.data.playerId = null; }
+    if (room.players.size === 0) { clearTimers(room); rooms.delete(room.code); return; }
+    ensureHost(room);
+    sys(room, reason === 'kicked' ? 'kicked' : 'left', p.name);
+    broadcast(room);
+    checkProgress(room);
+  }
+
+  function leave(socket, reason) {
+    const room = rooms.get(socket.data.roomCode);
+    const id = socket.data.playerId;
+    socket.data.roomCode = null; socket.data.playerId = null;
+    if (room && id) removePlayer(room, id, reason);
+  }
+
+  function findRoom(code) { return typeof code === 'string' ? rooms.get(code.trim().toUpperCase()) : undefined; }
+  function seatByToken(room, token) { return [...room.players.values()].find(p => p.token === token); }
+
+  function afterAttach(room, player, wasOffline) {
+    broadcast(room);
+    if (wasOffline && room.state !== 'lobby') sys(room, 'back', player.name);
+    sendPhase(room, player);
+    checkProgress(room);
+  }
+
+  function joinAck(room, player) {
+    return { success: true, code: room.code, playerId: player.id, state: room.state, chat: room.chat.slice(-30) };
+  }
+
+  // ---------- socket handlers ----------
+  io.on('connection', socket => {
+    const on = (ev, fn) => socket.on(ev, (...args) => {
+      try { fn(...args); } catch (e) {
+        log(`handler "${ev}" failed:`, e);
+        const ack = args[args.length - 1];
+        if (typeof ack === 'function') { try { ack({ success: false, error: 'server' }); } catch { /* ignore */ } }
+      }
+    });
+    const ctx = () => {
+      const room = rooms.get(socket.data.roomCode);
+      const player = room && room.players.get(socket.data.playerId);
+      return player ? { room, player, isHost: room.hostId === player.id } : null;
+    };
+    const profile = data => ({
+      name: L.cleanText(data.name, L.MAX_NAME_LEN),
+      avatar: L.cleanText(typeof data.avatar === 'string' ? data.avatar : '', 8) || '😎',
+    });
+
+    on('room:create', (data, cb) => {
+      if (typeof cb !== 'function') return;
+      if (!data || typeof data !== 'object') return cb({ success: false, error: 'invalid' });
+      const { name, avatar } = profile(data);
+      if (!name || !TOKEN_RE.test(data.token || '')) return cb({ success: false, error: 'invalid' });
+      if (socket.data.roomCode) leave(socket, 'left');
+      const room = createRoom(data.lang);
+      const player = { id: newId(), token: data.token, name, avatar, socketId: null, connected: false, graceTimer: null, score: 0 };
+      room.players.set(player.id, player);
+      room.names.set(player.id, { name, avatar });
+      room.hostId = player.id;
+      attach(socket, room, player);
+      cb(joinAck(room, player));
+      broadcast(room);
+    });
+
+    on('room:join', (data, cb) => {
+      if (typeof cb !== 'function') return;
+      if (!data || typeof data !== 'object') return cb({ success: false, error: 'invalid' });
+      const { name, avatar } = profile(data);
+      if (!name || !TOKEN_RE.test(data.token || '')) return cb({ success: false, error: 'invalid' });
+      const room = findRoom(data.code);
+      if (!room) return cb({ success: false, error: 'not_found' });
+      if (room.kicked.has(data.token)) return cb({ success: false, error: 'kicked' });
+      const seat = seatByToken(room, data.token);
+      if (seat) { // same browser coming back: resume the seat instead of creating a ghost
+        const wasOffline = attach(socket, room, seat);
+        cb(joinAck(room, seat));
+        return afterAttach(room, seat, wasOffline);
+      }
+      if (room.state !== 'lobby') return cb({ success: false, error: 'started' });
+      if (connected(room).length >= room.settings.maxPlayers) return cb({ success: false, error: 'full' });
+      const player = { id: newId(), token: data.token, name, avatar, socketId: null, connected: false, graceTimer: null, score: 0 };
+      room.players.set(player.id, player);
+      room.names.set(player.id, { name, avatar });
+      attach(socket, room, player);
+      cb(joinAck(room, player));
+      broadcast(room);
+      sys(room, 'joined', name);
+    });
+
+    on('room:resume', (data, cb) => {
+      if (typeof cb !== 'function') return;
+      if (!data || typeof data !== 'object' || !TOKEN_RE.test(data.token || '')) return cb({ success: false, error: 'invalid' });
+      const room = findRoom(data.code);
+      const seat = room && seatByToken(room, data.token);
+      if (!seat) return cb({ success: false, error: 'not_found' });
+      const wasOffline = attach(socket, room, seat);
+      cb(joinAck(room, seat));
+      afterAttach(room, seat, wasOffline);
+    });
+
+    on('room:leave', cb => {
+      if (socket.data.roomCode) leave(socket, 'left');
+      if (typeof cb === 'function') cb({ success: true });
+    });
+
+    on('room:settings', s => {
+      const c = ctx(); if (!c || !c.isHost || c.room.state !== 'lobby') return;
+      c.room.settings = L.sanitizeSettings(c.room.settings, s);
+      broadcast(c.room);
+    });
+
+    on('room:kick', pid => {
+      const c = ctx(); if (!c || !c.isHost || typeof pid !== 'string' || pid === c.player.id) return;
+      const target = c.room.players.get(pid); if (!target) return;
+      c.room.kicked.add(target.token);
+      emitTo(target, 'kicked');
+      removePlayer(c.room, pid, 'kicked');
+    });
+
+    on('game:start', () => {
+      const c = ctx(); if (!c || !c.isHost || c.room.state !== 'lobby') return;
+      const room = c.room;
+      if (connected(room).length < 2) return emitTo(c.player, 'error', 'need2');
+      // Players who dropped in the lobby and never came back don't join the game.
+      for (const p of [...room.players.values()]) if (!p.connected) removePlayer(room, p.id, 'left');
+      room.round = 0; room.pickerIndex = 0; room.usedQuestions.clear();
+      room.lastEnd = null; room.names.clear();
+      for (const p of room.players.values()) { p.score = 0; room.names.set(p.id, { name: p.name, avatar: p.avatar }); }
+      startRound(room);
+    });
+
+    on('game:pickCategory', cat => {
+      const c = ctx(); if (!c) return;
+      const { room, player } = c;
+      if (room.state !== 'picking' || player.id !== room.pickerId) return;
+      if (typeof cat !== 'string' || !room.pickCats.includes(cat)) return;
+      startQuestion(room, cat);
+    });
+
+    on('game:answer', (text, cb) => {
+      const ack = typeof cb === 'function' ? cb : () => {};
+      const c = ctx(); if (!c) return ack({ success: false, error: 'invalid' });
+      const { room, player } = c;
+      if (room.state !== 'question') return ack({ success: false, error: 'phase' });
+      if (room.answers.has(player.id)) return ack({ success: false, error: 'already' });
+      const clean = L.cleanText(text, L.MAX_ANSWER_LEN);
+      if (!clean) return ack({ success: false, error: 'empty' });
+      if (L.isRealAnswer(room.question, clean)) return ack({ success: false, error: 'real' });
+      room.answers.set(player.id, clean);
+      ack({ success: true, answer: clean });
+      checkProgress(room);
+    });
+
+    on('game:vote', (idx, cb) => {
+      const ack = typeof cb === 'function' ? cb : () => {};
+      const c = ctx(); if (!c) return ack({ success: false, error: 'invalid' });
+      const { room, player } = c;
+      if (room.state !== 'voting') return ack({ success: false, error: 'phase' });
+      if (room.votes.has(player.id)) return ack({ success: false, error: 'already' });
+      if (!Number.isInteger(idx) || idx < 0 || idx >= room.options.length) return ack({ success: false, error: 'invalid' });
+      if (room.options[idx].authors.includes(player.id)) return ack({ success: false, error: 'own' });
+      room.votes.set(player.id, idx);
+      ack({ success: true });
+      checkProgress(room);
+    });
+
+    on('game:next', () => {
+      const c = ctx(); if (!c || !c.isHost || c.room.state !== 'results') return;
+      startRound(c.room);
+    });
+
+    on('game:restart', () => {
+      const c = ctx(); if (!c || !c.isHost || c.room.state !== 'finished') return;
+      const room = c.room;
+      clearTimers(room);
+      room.state = 'lobby'; room.round = 0; room.pickerIndex = 0; room.pickerId = null;
+      room.usedQuestions.clear(); room.lastEnd = null; room.lastResults = null;
+      for (const p of room.players.values()) p.score = 0;
+      broadcast(room);
+    });
+
+    on('chat:send', text => {
+      const c = ctx(); if (!c) return;
+      const t = L.cleanText(text, 200); if (!t) return;
+      const m = { t: 'p', name: c.player.name, avatar: c.player.avatar, text: t };
+      c.room.chat.push(m); if (c.room.chat.length > 100) c.room.chat.shift();
+      emitAll(c.room, 'chat:msg', m);
+    });
+
+    on('disconnect', () => {
+      const room = rooms.get(socket.data.roomCode);
+      const player = room && room.players.get(socket.data.playerId);
+      if (!player || player.socketId !== socket.id) return;
+      player.connected = false; player.socketId = null;
+      player.graceTimer = setTimeout(safe('grace', () => {
+        if (rooms.get(room.code) === room && room.players.get(player.id) === player && !player.connected) removePlayer(room, player.id, 'left');
+      }), graceMs);
+      ensureHost(room);
+      broadcast(room);
+      if (room.state === 'question') emitAll(room, 'game:answered', progressCounts(room, room.answers));
+      if (room.state === 'voting') emitAll(room, 'game:voted', progressCounts(room, room.votes));
+      setTimeout(safe('settle', () => { if (rooms.get(room.code) === room) checkProgress(room); }), settleMs);
+    });
+  });
+
+  function close() {
+    for (const room of rooms.values()) {
+      clearTimers(room);
+      for (const p of room.players.values()) clearTimeout(p.graceTimer);
+    }
+    rooms.clear();
+    return new Promise(resolve => { io.close(() => resolve()); });
+  }
+
+  return { app, server, io, rooms, close };
+}
+
+module.exports = { createGameServer };
+
+if (require.main === module) {
+  const { server } = createGameServer();
+  const PORT = process.env.PORT || 3000;
+  server.listen(PORT, () => console.log(`http://localhost:${PORT}`));
+}

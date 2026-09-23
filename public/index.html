@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>كَلَك | Kalak</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
@@ -31,14 +32,14 @@
         </div>
         <h1 class="logo-text">كَلَك</h1>
         <p class="logo-sub">KALAK</p>
-        <p class="logo-desc" id="logo-desc">تحدى أصدقاءك في أسئلة المعرفة!</p>
+        <p class="logo-desc" data-i18n="tagline">تحدى أصدقاءك في أسئلة المعرفة!</p>
       </div>
       <div class="landing-btns">
-        <button class="btn btn-glow" id="btn-create"><span>🎮</span> <span id="t-create">انشئ غرفة</span></button>
-        <button class="btn btn-outline" id="btn-join-toggle"><span>🚪</span> <span id="t-joinRoom">انضم لغرفة</span></button>
+        <button class="btn btn-glow" id="btn-create"><span>🎮</span> <span data-i18n="create">انشئ غرفة</span></button>
+        <button class="btn btn-outline" id="btn-join-toggle"><span>🚪</span> <span data-i18n="joinRoom">انضم لغرفة</span></button>
         <div class="join-row hidden" id="join-group">
           <input type="text" id="input-code" class="inp" placeholder="XXXXX" maxlength="5" dir="ltr" autocomplete="off">
-          <button class="btn btn-green" id="btn-join">انضم</button>
+          <button class="btn btn-green" id="btn-join" data-i18n="join">انضم</button>
         </div>
       </div>
       <div class="lang-row">
@@ -51,27 +52,27 @@
   <!-- PROFILE -->
   <div id="screen-profile" class="screen">
     <div class="s-inner">
-      <h2 class="s-title" id="t-chooseChar">اختر شخصيتك</h2>
+      <h2 class="s-title" data-i18n="chooseChar">اختر شخصيتك</h2>
       <div class="avatar-grid" id="avatar-grid"></div>
-      <input type="text" id="input-name" class="inp inp-big" placeholder="اسمك" maxlength="15">
-      <button class="btn btn-glow w-full" id="btn-ready">يلا نلعب! 🎯</button>
+      <input type="text" id="input-name" class="inp inp-big" placeholder="اسمك" data-i18n-ph="namePh" maxlength="15" autocomplete="nickname">
+      <button class="btn btn-glow w-full" id="btn-ready" data-i18n="ready">يلا نلعب! 🎯</button>
     </div>
   </div>
 
   <!-- LOBBY -->
   <div id="screen-lobby" class="screen">
     <div class="s-inner">
-      <h2 class="s-title" id="t-lobby">غرفة الانتظار</h2>
+      <h2 class="s-title" data-i18n="lobby">غرفة الانتظار</h2>
       <div class="code-box">
-        <span class="code-label" id="t-roomCode">كود الغرفة</span>
+        <span class="code-label" data-i18n="roomCode">كود الغرفة</span>
         <span class="code-val" id="lobby-code">-----</span>
         <button class="icon-btn" id="btn-copy">📋</button>
         <button class="icon-btn" id="btn-share">🔗</button>
       </div>
       <div class="players-grid" id="lobby-players"></div>
       <div class="settings-box" id="settings-box">
-        <h3 class="set-title">⚙️ <span id="t-settings">إعدادات اللعبة</span></h3>
-        <div class="set-row"><label id="t-cats">الفئات</label>
+        <h3 class="set-title">⚙️ <span data-i18n="settings">إعدادات اللعبة</span></h3>
+        <div class="set-row"><label data-i18n="cats">الفئات</label>
           <div class="chips" id="chips">
             <button class="chip on" data-c="general">عام 🌍</button>
             <button class="chip" data-c="geography">جغرافيا 🗺️</button>
@@ -88,17 +89,17 @@
             <button class="chip" data-c="flags">أعلام 🏳️</button>
           </div>
         </div>
-        <div class="set-row"><label id="t-rounds">الجولات</label><div class="stepper"><button class="step-btn" data-s="rounds" data-d="-1">−</button><span class="step-val" id="v-rounds">5</span><button class="step-btn" data-s="rounds" data-d="1">+</button></div></div>
-        <div class="set-row"><label id="t-atime">وقت الإجابة</label><div class="stepper"><button class="step-btn" data-s="answerTime" data-d="-5">−</button><span class="step-val" id="v-answerTime">30</span><button class="step-btn" data-s="answerTime" data-d="5">+</button></div></div>
-        <div class="set-row"><label id="t-vtime">وقت التصويت</label><div class="stepper"><button class="step-btn" data-s="voteTime" data-d="-5">−</button><span class="step-val" id="v-voteTime">20</span><button class="step-btn" data-s="voteTime" data-d="5">+</button></div></div>
-        <div class="set-row"><label id="t-maxp">الحد الأقصى</label><div class="stepper"><button class="step-btn" data-s="maxPlayers" data-d="-1">−</button><span class="step-val" id="v-maxPlayers">12</span><button class="step-btn" data-s="maxPlayers" data-d="1">+</button></div></div>
-        <div class="set-row"><label id="t-lang">اللغة</label><div class="stepper"><button class="lang-set active" data-lang="ar">عربي</button><button class="lang-set" data-lang="en">EN</button></div></div>
+        <div class="set-row"><label data-i18n="rounds">الجولات</label><div class="stepper"><button class="step-btn" data-s="rounds" data-d="-1">−</button><span class="step-val" id="v-rounds">5</span><button class="step-btn" data-s="rounds" data-d="1">+</button></div></div>
+        <div class="set-row"><label data-i18n="atime">وقت الإجابة</label><div class="stepper"><button class="step-btn" data-s="answerTime" data-d="-5">−</button><span class="step-val" id="v-answerTime">30</span><button class="step-btn" data-s="answerTime" data-d="5">+</button></div></div>
+        <div class="set-row"><label data-i18n="vtime">وقت التصويت</label><div class="stepper"><button class="step-btn" data-s="voteTime" data-d="-5">−</button><span class="step-val" id="v-voteTime">20</span><button class="step-btn" data-s="voteTime" data-d="5">+</button></div></div>
+        <div class="set-row"><label data-i18n="maxp">الحد الأقصى</label><div class="stepper"><button class="step-btn" data-s="maxPlayers" data-d="-1">−</button><span class="step-val" id="v-maxPlayers">12</span><button class="step-btn" data-s="maxPlayers" data-d="1">+</button></div></div>
+        <div class="set-row"><label data-i18n="lang">اللغة</label><div class="stepper"><button class="lang-set active" data-lang="ar">عربي</button><button class="lang-set" data-lang="en">EN</button></div></div>
       </div>
-      <button class="btn btn-glow w-full hidden" id="btn-start">ابدأ اللعبة! 🚀</button>
-      <p class="wait-msg" id="wait-msg">في انتظار المضيف...</p>
+      <button class="btn btn-glow w-full hidden" id="btn-start" data-i18n="start">ابدأ اللعبة! 🚀</button>
+      <p class="wait-msg" id="wait-msg" data-i18n="waitHost">في انتظار المضيف...</p>
       <div class="chat-box">
         <div class="chat-msgs" id="chat-msgs"></div>
-        <div class="chat-row"><input type="text" id="inp-chat" class="inp inp-chat" placeholder="رسالة..." maxlength="200"><button class="btn btn-green btn-sm" id="btn-chat">↑</button></div>
+        <div class="chat-row"><input type="text" id="inp-chat" class="inp inp-chat" placeholder="رسالة..." data-i18n-ph="chatPh" maxlength="200"><button class="btn btn-green btn-sm" id="btn-chat">↑</button></div>
       </div>
     </div>
   </div>
@@ -116,7 +117,7 @@
         <span class="pick-label" id="pick-label">يختار الموضوع</span>
       </div>
       <div class="pick-cats" id="pick-cats"></div>
-      <p class="pick-wait hidden" id="pick-wait">في انتظار الاختيار...</p>
+      <p class="pick-wait hidden" id="pick-wait" data-i18n="waitPick">في انتظار الاختيار...</p>
     </div>
   </div>
 
@@ -133,9 +134,9 @@
         <p class="q-text" id="q-text"></p>
       </div>
       <div class="ans-area">
-        <input type="text" id="inp-ans" class="inp inp-big" placeholder="اكتب إجابة مقنعة...">
-        <button class="btn btn-glow w-full" id="btn-ans">إرسال ✓</button>
-        <p class="ans-status" id="ans-status"></p>
+        <input type="text" id="inp-ans" class="inp inp-big" placeholder="اكتب إجابة مقنعة..." data-i18n-ph="ansPh" maxlength="60" autocomplete="off">
+        <button class="btn btn-glow w-full" id="btn-ans" data-i18n="submit">إرسال ✓</button>
+        <p class="ans-status" id="ans-status" role="status"></p>
       </div>
     </div>
   </div>
@@ -147,7 +148,8 @@
         <div class="badge" id="vt-round">1/5</div>
         <div class="timer-wrap"><svg viewBox="0 0 100 100"><circle class="t-bg" cx="50" cy="50" r="44"/><circle class="t-prog" cx="50" cy="50" r="44" id="vt-ring"/></svg><span class="t-num" id="vt-timer">20</span></div>
       </div>
-      <h2 class="vote-title" id="t-voteTitle">اختر الإجابة الصحيحة!</h2>
+      <p class="vt-q" id="vt-q"></p>
+      <h2 class="vote-title" data-i18n="voteTitle">اختر الإجابة الصحيحة!</h2>
       <div class="vote-list" id="vote-list"></div>
       <p class="vote-status" id="vote-status"></p>
     </div>
@@ -156,12 +158,13 @@
   <!-- RESULTS -->
   <div id="screen-results" class="screen">
     <div class="s-inner">
-      <h2 class="s-title">النتائج 🏆</h2>
+      <h2 class="s-title" data-i18n="results">النتائج 🏆</h2>
       <div class="correct-box" id="correct-box"></div>
       <div class="breakdown" id="breakdown"></div>
       <div class="res-list" id="res-list"></div>
       <div class="sb-mini" id="sb-mini"></div>
-      <button class="btn btn-glow w-full hidden" id="btn-next">الجولة التالية ➡️</button>
+      <button class="btn btn-glow w-full hidden" id="btn-next">التالي ➡️</button>
+      <p class="wait-msg hidden" id="next-wait" data-i18n="waitHost">في انتظار المضيف…</p>
     </div>
   </div>
 
@@ -169,11 +172,13 @@
   <div id="screen-final" class="screen">
     <div class="s-inner">
       <div id="confetti"></div>
-      <h2 class="s-title final-t">🎉 انتهت اللعبة! 🎉</h2>
+      <h2 class="s-title final-t" data-i18n="gameOver">🎉 انتهت اللعبة! 🎉</h2>
+      <p class="final-note" id="final-note"></p>
       <div class="podium" id="podium"></div>
       <div class="final-sb" id="final-sb"></div>
-      <button class="btn btn-glow w-full" id="btn-again">العب مرة ثانية 🔄</button>
-      <button class="btn btn-outline w-full" id="btn-home" style="margin-top:10px">الرئيسية 🏠</button>
+      <button class="btn btn-glow w-full hidden" id="btn-again" data-i18n="again">العب مرة ثانية 🔄</button>
+      <p class="wait-msg hidden" id="again-wait" data-i18n="waitHost">في انتظار المضيف…</p>
+      <button class="btn btn-outline w-full" id="btn-home" style="margin-top:10px" data-i18n="home">الرئيسية 🏠</button>
     </div>
   </div>
 
@@ -181,28 +186,21 @@
   <div id="screen-kicked" class="screen">
     <div class="s-inner" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:70vh">
       <div style="font-size:72px;margin-bottom:16px">🚫</div>
-      <h2 class="s-title">تم طردك من الغرفة</h2>
-      <button class="btn btn-glow" onclick="location.reload()" style="margin-top:20px">الرئيسية 🏠</button>
+      <h2 class="s-title" data-i18n="kicked">تم طردك من الغرفة</h2>
+      <button class="btn btn-glow" id="btn-kicked-home" style="margin-top:20px" data-i18n="home">الرئيسية 🏠</button>
     </div>
   </div>
 
-  <!-- DEBUG -->
-  <div id="debug" class="debug hidden">
-    <div class="dbg-head"><span>🛠️ Debug</span><button class="dbg-x" id="dbg-x">✕</button></div>
-    <div class="dbg-body">
-      <div class="dbg-sec"><h4>Controls</h4>
-        <button class="dbg-btn" id="d-pause">⏸ Pause/Resume</button>
-        <button class="dbg-btn" id="d-skip">⏭ Skip Phase</button>
-        <button class="dbg-btn dbg-red" id="d-end">🛑 End Game</button>
-        <button class="dbg-btn" id="d-add">➕ +5 Rounds</button>
-      </div>
-      <div class="dbg-sec"><h4>Answers</h4><div id="d-ans" class="d-ans">...</div><button class="dbg-btn" id="d-ref">🔄 Refresh</button></div>
-      <div class="dbg-sec"><h4>Players</h4><div id="d-players"></div></div>
+  <!-- OPENED ELSEWHERE -->
+  <div id="screen-replaced" class="screen">
+    <div class="s-inner" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:70vh">
+      <div style="font-size:72px;margin-bottom:16px">📱</div>
+      <h2 class="s-title" data-i18n="replaced">فُتحت اللعبة في نافذة أخرى</h2>
+      <button class="btn btn-glow" id="btn-play-here" style="margin-top:20px" data-i18n="playHere">العب هنا</button>
     </div>
   </div>
 
-  <!-- PAUSED -->
-  <div id="paused" class="paused hidden"><div class="paused-c"><span style="font-size:48px">⏸️</span><h2>اللعبة متوقفة</h2></div></div>
+  <div id="net" class="net-banner hidden" role="status"><span class="net-dot"></span><span data-i18n="reconnecting">جارٍ إعادة الاتصال…</span></div>
 
   <div id="toast" class="toast"></div>
 
