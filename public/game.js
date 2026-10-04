@@ -1,7 +1,8 @@
-const socket = io();
+const socket = new Net(); // public/net.js: one WebSocket per room, socket.io-like API
 
 const AVATARS = ['😎','🤖','👾','🎮','🕹️','🦊','🐱','🐶','🦁','🐸','🐵','🦄','🐲','🎃','👻','🤠','🥷','🧙','🦸','🧛','🐼','🦋','🐙','🦖','🎭','🤡','🐺','🦅','🐝','🎯'];
 const MAX_ANSWER = 60;
+const CODE_RE = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{5}$/;
 
 const CAT = {
   ar:{general:'عام 🌍',geography:'جغرافيا 🗺️',history:'تاريخ 📜',science:'علوم 🔬',literature:'أدب 📚',sports:'رياضة ⚽',entertainment:'ترفيه 🎬',technology:'تقنية 💻',food:'طعام 🍕',islam:'إسلام 🕌',arabic:'عربي 🏜️',animals:'حيوانات 🐾',flags:'أعلام 🏳️'},
@@ -24,7 +25,7 @@ const TXT = {
     playHere:'العب هنا', reconnecting:'جارٍ إعادة الاتصال…', enterCode:'أدخل كود الغرفة', enterName:'أدخل اسمك',
     copied:'تم النسخ!', linkCopied:'تم نسخ الرابط!', rejoinFail:'انتهت لعبتك السابقة', and:'و',
     err_not_found:'الغرفة غير موجودة', err_kicked:'تم طردك من هذه الغرفة', err_started:'اللعبة بدأت بالفعل',
-    err_full:'الغرفة ممتلئة', err_invalid:'بيانات غير صالحة', err_server:'حدث خطأ، حاول مرة أخرى',
+    err_full:'الغرفة ممتلئة', err_invalid:'بيانات غير صالحة', err_server:'حدث خطأ، حاول مرة أخرى', err_taken:'الكود مستخدم، حاول مرة أخرى',
     err_need2:'تحتاج لاعبَين على الأقل', err_own:'لا يمكنك التصويت لإجابتك', err_phase:'انتهى الوقت',
     sys_joined:'{n} انضم', sys_left:'{n} غادر', sys_kicked:'تم طرد {n}', sys_back:'{n} عاد',
   },
@@ -43,7 +44,7 @@ const TXT = {
     playHere:'Play here', reconnecting:'Reconnecting…', enterCode:'Enter the room code', enterName:'Enter your name',
     copied:'Copied!', linkCopied:'Link copied!', rejoinFail:'Your previous game has ended', and:'&',
     err_not_found:'Room not found', err_kicked:'You were removed from this room', err_started:'Game already started',
-    err_full:'Room is full', err_invalid:'Invalid input', err_server:'Something went wrong, try again',
+    err_full:'Room is full', err_invalid:'Invalid input', err_server:'Something went wrong, try again', err_taken:'That code is in use, try again',
     err_need2:'You need at least 2 players', err_own:"You can't vote for your own answer", err_phase:'Time is up',
     sys_joined:'{n} joined', sys_left:'{n} left', sys_kicked:'{n} was removed', sys_back:'{n} is back',
   },
@@ -151,9 +152,26 @@ $('#btn-ready').onclick=()=>{
   if(!n){toast(t('enterName'));$('#input-name').focus();return;}
   S.name=n;store.set('kalak_name',n);
   const btn=$('#btn-ready');btn.disabled=true;
-  const done=r=>{btn.disabled=false;if(r&&r.success)enterRoom(r);else toast(errText(r&&r.error));};
-  if(S.action==='create')socket.emit('room:create',{name:n,avatar:S.avatar,token:TOKEN,lang:S.lang},done);
-  else socket.emit('room:join',{code:S.joinCode,name:n,avatar:S.avatar,token:TOKEN},done);
+  let finished=false;
+  const done=r=>{
+    if(finished)return;finished=true;clearTimeout(slow);btn.disabled=false;
+    if(r&&r.success){enterRoom(r);return;}
+    if(!S.room)socket.close();
+    toast(errText(r&&r.error));
+  };
+  const slow=setTimeout(()=>done(null),10000); // server unreachable: don't leave the button stuck
+  if(S.action==='create'){
+    // The server hands out an unused code, then we open that room and create it.
+    fetch('/api/rooms',{method:'POST'}).then(r=>r.ok?r.json():Promise.reject(r.status)).then(j=>{
+      if(finished)return;
+      socket.open(j.code);
+      socket.emit('room:create',{name:n,avatar:S.avatar,token:TOKEN,lang:S.lang},done);
+    }).catch(()=>done(null));
+  } else {
+    if(!CODE_RE.test(S.joinCode)){done({success:false,error:'not_found'});return;}
+    socket.open(S.joinCode);
+    socket.emit('room:join',{code:S.joinCode,name:n,avatar:S.avatar,token:TOKEN},done);
+  }
 };
 $('#input-name').onkeydown=e=>{if(e.key==='Enter')$('#btn-ready').click();};
 
@@ -226,12 +244,14 @@ socket.on('chat:msg',addChat);
 // CONNECTION / RECONNECT
 function resume(){
   const code=S.room||session.get()?.code;
-  if(!code)return;
+  if(!code||code!==socket.room)return;
   const wasIn=!!S.room;
   socket.emit('room:resume',{code,token:TOKEN},r=>{
     if(r&&r.success){enterRoom(r);return;}
+    if(r&&r.error==='server')return; // connection dropped again: the next 'connect' retries
     session.clear();
     if(wasIn){S.room=null;S.me=null;toast(t('rejoinFail'));show('landing');}
+    if(!S.room&&S.screen!=='profile'&&socket.room===code)socket.close();
   });
 }
 socket.on('connect',()=>{$('#net').classList.add('hidden');resume();});
@@ -432,9 +452,10 @@ socket.on('game:end',d=>{const first=S.screen!=='final';S.end=d;show('final');re
 $('#btn-again').onclick=()=>socket.emit('game:restart');
 function goHome(){
   S.room=null;session.clear();
-  const go=()=>{location.href=location.pathname;};
+  let gone=false;
+  const go=()=>{if(gone)return;gone=true;location.href=location.pathname;};
   // Wait for the server to free the seat (so it doesn't linger as an offline player), but never hang.
-  socket.timeout(800).emit('room:leave',go);
+  socket.emit('room:leave',go);setTimeout(go,800);
 }
 $('#btn-home').onclick=goHome;
 $('#btn-kicked-home').onclick=()=>{session.clear();location.href=location.pathname;};
@@ -464,3 +485,6 @@ setLang(store.get('kalak_lang')||'ar');
 const urlRoom=new URLSearchParams(location.search).get('room');
 if(urlRoom&&session.get()?.code!==urlRoom.toUpperCase())session.clear();
 if(urlRoom){S.action='join';S.joinCode=urlRoom.toUpperCase().replace(/[^A-Z0-9]/g,'');initAvatars();show('profile');}
+// Back in a room we were playing in (page reload): reconnect and resume the seat.
+const savedCode=session.get()?.code;
+if(savedCode&&CODE_RE.test(savedCode))socket.open(savedCode);
