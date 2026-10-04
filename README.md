@@ -2,7 +2,7 @@
 
 A browser party game for friends: everyone invents a fake answer to a trivia question, then tries to spot the real one among the bluffs. **Play online with friends anywhere**: one person creates a room and shares the 5-character code or the invite link, and everyone else joins from their phone or computer. It also runs on your own computer for players on the same Wi-Fi. Arabic-first (RTL) interface with an English mode.
 
-**Play online:** *(live URL coming soon)*
+**Play online:** [kalak-aar.pages.dev](https://kalak-aar.pages.dev/)
 
 Online, the game runs on Cloudflare Workers with one Durable Object per room; locally it runs on Node.js (`npm start`). Both use the same game code over plain WebSockets.
 
