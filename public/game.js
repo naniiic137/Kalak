@@ -162,7 +162,7 @@ $('#btn-ready').onclick=()=>{
   const slow=setTimeout(()=>done(null),10000); // server unreachable: don't leave the button stuck
   if(S.action==='create'){
     // The server hands out an unused code, then we open that room and create it.
-    fetch('/api/rooms',{method:'POST'}).then(r=>r.ok?r.json():Promise.reject(r.status)).then(j=>{
+    fetch((window.GAME_SERVER||'')+'/api/rooms',{method:'POST'}).then(r=>r.ok?r.json():Promise.reject(r.status)).then(j=>{
       if(finished)return;
       socket.open(j.code);
       socket.emit('room:create',{name:n,avatar:S.avatar,token:TOKEN,lang:S.lang},done);

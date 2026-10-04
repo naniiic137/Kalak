@@ -5,25 +5,50 @@ import roomLib from '../lib/room.js';
 
 const { createRoom, makeConn, genCode, normalizeCode } = roomLib;
 
+// The Pages site (kalak-hbi.pages.dev, plus its preview subdomains) only serves the files and uses this
+// Worker as its server; other sites may not. Browsers send Origin on fetch and WebSocket requests.
+function allowedOrigin(origin, self) {
+  if (!origin || origin === self) return true;
+  try {
+    const { protocol, hostname } = new URL(origin);
+    if (hostname === 'localhost' || hostname === '127.0.0.1') return true;
+    return protocol === 'https:' && (hostname === 'kalak-hbi.pages.dev' || hostname.endsWith('.kalak-hbi.pages.dev'));
+  } catch { return false; }
+}
+
+function withCors(response, origin) {
+  if (!origin) return response;
+  const r = new Response(response.body, response);
+  r.headers.set('Access-Control-Allow-Origin', origin);
+  r.headers.set('Vary', 'Origin');
+  return r;
+}
+
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
 });
 
+async function newRoom(request, env) {
+  if (request.method !== 'POST') return json({ error: 'method' }, 405);
+  // Pick a random code and ask that room's Durable Object to hold it; retry if it is in use.
+  for (let i = 0; i < 10; i++) {
+    const code = genCode();
+    const stub = env.ROOMS.get(env.ROOMS.idFromName(code));
+    const r = await stub.fetch(`https://room/reserve?room=${code}`, { method: 'POST' });
+    if (r.ok) return json({ code });
+  }
+  return json({ error: 'busy' }, 503);
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-
-    if (url.pathname === '/api/rooms') {
-      if (request.method !== 'POST') return json({ error: 'method' }, 405);
-      // Pick a random code and ask that room's Durable Object to hold it; retry if it is in use.
-      for (let i = 0; i < 10; i++) {
-        const code = genCode();
-        const stub = env.ROOMS.get(env.ROOMS.idFromName(code));
-        const r = await stub.fetch(`https://room/reserve?room=${code}`, { method: 'POST' });
-        if (r.ok) return json({ code });
-      }
-      return json({ error: 'busy' }, 503);
+    const origin = request.headers.get('Origin');
+    if ((url.pathname === '/api/rooms' || url.pathname === '/ws') && !allowedOrigin(origin, url.origin)) {
+      return new Response('Forbidden', { status: 403 });
     }
+
+    if (url.pathname === '/api/rooms') return withCors(await newRoom(request, env), origin);
 
     if (url.pathname === '/ws') {
       const code = normalizeCode(url.searchParams.get('room'));

@@ -45,8 +45,8 @@ class Net {
   }
 
   dial(){
-    const proto=location.protocol==='https:'?'wss:':'ws:';
-    const ws=new WebSocket(`${proto}//${location.host}/ws?room=${encodeURIComponent(this.room)}`);
+    const base=(window.GAME_SERVER||location.origin).replace(/^http/,'ws');
+    const ws=new WebSocket(`${base}/ws?room=${encodeURIComponent(this.room)}`);
     this.ws=ws;
     ws.onopen=()=>{
       if(this.ws!==ws)return;
