@@ -1,13 +1,14 @@
 'use strict';
-// End-to-end tests: a real server on a test port, driven by socket.io-client.
+// End-to-end tests: a real server on a test port, driven by a small WebSocket client.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
-const { io: ioc } = require('socket.io-client');
+const { connect: wsConnect } = require('./ws-client');
 const { createGameServer } = require('../server');
 
 const PORT = Number(process.env.KALAK_TEST_PORT) || 3609;
 const URL = `http://localhost:${PORT}`;
+const WS_URL = `ws://localhost:${PORT}/ws`;
 const GRACE_MS = 1500;
 
 let game;
@@ -31,12 +32,17 @@ test.afterEach(() => {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const newToken = () => crypto.randomBytes(16).toString('hex');
 
-function connect() {
-  const s = ioc(URL, { transports: ['websocket'], forceNew: true, reconnection: false });
+async function connect(code) {
+  const s = await wsConnect(`${WS_URL}?room=${encodeURIComponent(code)}`);
   clients.add(s);
-  s.events = [];
-  s.onAny((ev, data) => s.events.push({ ev, data }));
-  return new Promise((resolve, reject) => { s.once('connect', () => resolve(s)); s.once('connect_error', reject); });
+  return s;
+}
+
+/** Asks the server for a fresh room code, like the browser does before room:create. */
+async function newCode() {
+  const r = await fetch(`${URL}/api/rooms`, { method: 'POST' });
+  assert.equal(r.status, 200);
+  return (await r.json()).code;
 }
 
 /** Resolves with the next `ev` received that matches `pred`. */
@@ -51,7 +57,7 @@ const ack = (s, ev, data) => new Promise(resolve => s.emit(ev, data, resolve));
 const lastState = s => [...s.events].reverse().find(e => e.ev === 'room:state')?.data;
 
 async function makePlayer(name, code) {
-  const s = await connect();
+  const s = await connect(code || await newCode());
   s.token = newToken();
   const r = code
     ? await ack(s, 'room:join', { code, name, avatar: '🦊', token: s.token })
@@ -69,7 +75,7 @@ async function makeRoom(n = 3) {
   return players;
 }
 
-const roomOf = s => game.rooms.get(s.code);
+const roomOf = s => game.rooms.get(s.code)?.data;
 const byPid = (ps, pid) => ps.find(p => p.pid === pid);
 
 /** Starts the game (or next round) and has the picker choose, resolving when the question is shown. */
@@ -183,7 +189,7 @@ test('reload mid-game resumes the same seat and score', async () => {
   await sleep(50);
   assert.equal(roomOf(host).players.get(p2.pid).connected, false);
 
-  const back = await connect();
+  const back = await connect(host.code);
   const q = waitFor(back, 'game:question');
   const r = await ack(back, 'room:resume', { code: host.code, token: p2.token });
   assert.equal(r.success, true);
@@ -198,16 +204,17 @@ test('reload mid-game resumes the same seat and score', async () => {
   assert.equal(lastState(host).players.length, 3, 'no ghost seat');
 
   // Joining again through the join form with the same browser token also resumes (no "Game already started").
-  const viaJoin = await connect();
+  const viaJoin = await connect(host.code);
   const j = await ack(viaJoin, 'room:join', { code: host.code, name: 'Whatever', avatar: '🐱', token: p2.token });
   assert.equal(j.success, true);
   assert.equal(j.playerId, p2.pid);
   await sleep(50);
   assert.ok(back.events.some(e => e.ev === 'session:replaced'), 'older tab is told it was replaced');
+  assert.equal(back.closeCode, 4001, 'and its connection is closed so it does not reconnect');
   assert.equal(roomOf(host).players.size, 3);
 
   // A different browser still can't join a running game.
-  const stranger = await connect();
+  const stranger = await connect(host.code);
   const s = await ack(stranger, 'room:join', { code: host.code, name: 'New', avatar: '🐱', token: newToken() });
   assert.deepEqual(s, { success: false, error: 'started' });
 });
@@ -218,7 +225,7 @@ test('reloading in the lobby leaves no ghost and does not use up a slot', async 
   await sleep(50);
   p1.disconnect();
   await sleep(50);
-  const back = await connect();
+  const back = await connect(host.code);
   const r = await ack(back, 'room:resume', { code: host.code, token: p1.token });
   assert.equal(r.playerId, p1.pid);
   await sleep(50);
@@ -234,7 +241,7 @@ test('a player who never comes back is removed after the grace period (not on th
   await sleep(GRACE_MS + 300);
   assert.equal(roomOf(host).players.has(p2.pid), false);
   assert.equal(lastState(host).players.length, 2);
-  const back = await connect();
+  const back = await connect(host.code);
   const r = await ack(back, 'room:resume', { code: host.code, token: p2.token });
   assert.equal(r.success, false);
 });
@@ -296,10 +303,10 @@ test('kicks are stored by token, not by name', async () => {
   const kicked = waitFor(p1, 'kicked');
   host.emit('room:kick', p1.pid);
   await kicked;
-  const s = await connect();
+  const s = await connect(host.code);
   const again = await ack(s, 'room:join', { code: host.code, name: 'Another name', avatar: '🐱', token: p1.token });
   assert.deepEqual(again, { success: false, error: 'kicked' });
-  const other = await connect();
+  const other = await connect(host.code);
   const sameName = await ack(other, 'room:join', { code: host.code, name: p1.name, avatar: '🐱', token: newToken() });
   assert.equal(sameName.success, true, 'someone else with the same name can join');
 });
@@ -349,4 +356,113 @@ test('only the host can change settings, start, or go next', async () => {
   assert.equal(roomOf(host).state, 'lobby');
   const st = lastState(p1);
   assert.equal(JSON.stringify(st).includes(host.token), false, 'tokens are never broadcast');
+});
+
+test('room codes from POST /api/rooms are unique and valid; unknown codes are not found', async () => {
+  const codes = new Set();
+  for (let i = 0; i < 20; i++) codes.add(await newCode());
+  assert.equal(codes.size, 20);
+  for (const c of codes) assert.match(c, /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{5}$/);
+  assert.equal((await fetch(`${URL}/api/rooms`)).status, 404, 'only POST creates codes');
+
+  // A valid code nobody created: same "room not found" as before, for join and resume.
+  const unused = [...codes][0];
+  const s = await connect(unused.toLowerCase()); // codes are case-insensitive
+  assert.deepEqual(await ack(s, 'room:join', { code: unused, name: 'X', avatar: '🐱', token: newToken() }),
+    { success: false, error: 'not_found' });
+  assert.deepEqual(await ack(s, 'room:resume', { code: unused, token: newToken() }), { success: false, error: 'not_found' });
+  // A reserved code can't be handed out twice while its creator is connecting.
+  const host = await makePlayer('Host');
+  assert.notEqual(host.code, unused);
+});
+
+test('invalid room codes are refused at the WebSocket upgrade', async () => {
+  const before = game.rooms.size;
+  for (const q of ['?room=bad', '?room=ABCD', '?room=ABCDEF', '?room=OOOOO', '?room=AB%20CD', '?room=', '']) {
+    await assert.rejects(wsConnect(`${WS_URL}${q}`), /400/, `ws${q}`);
+  }
+  await assert.rejects(wsConnect(`ws://localhost:${PORT}/other?room=ABCDE`), /400/);
+  assert.equal(game.rooms.size, before, 'no room objects are created for bad codes');
+});
+
+test('a code in the payload must match the room the connection was opened for', async () => {
+  const [a] = await makeRoom(2);
+  const [b] = await makeRoom(2);
+  const s = await connect(a.code);
+  const r = await ack(s, 'room:join', { code: b.code, name: 'Mixed', avatar: '🐱', token: newToken() });
+  assert.deepEqual(r, { success: false, error: 'not_found' });
+  assert.equal(roomOf(b).players.size, 2);
+});
+
+test('two rooms run independently', async () => {
+  const A = await makeRoom(2);
+  const B = await makeRoom(3);
+  assert.notEqual(A[0].code, B[0].code);
+  B[0].emit('room:settings', { rounds: 9, lang: 'ar' });
+  B[1].emit('chat:send', 'only for room B');
+  await sleep(50);
+  assert.equal(roomOf(A[0]).settings.rounds, 5);
+  assert.equal(roomOf(A[0]).settings.lang, 'en');
+  assert.equal(A[0].events.some(e => e.ev === 'chat:msg' && e.data.text === 'only for room B'), false);
+  assert.ok(B[2].events.some(e => e.ev === 'chat:msg' && e.data.text === 'only for room B'));
+
+  // Room A plays a round while room B stays in its lobby and hears nothing about it.
+  await toQuestion(A, () => A[0].emit('game:start'));
+  const vote = await answerAll(A, ['alpha', 'beta']);
+  const res = waitFor(A[0], 'game:results');
+  const realId = vote.options.find(o => o.text === roomOf(A[0]).question.aE).id;
+  for (const s of A) assert.equal((await ack(s, 'game:vote', realId)).success, true);
+  await res;
+  assert.equal(roomOf(B[0]).state, 'lobby');
+  assert.equal(lastState(B[0]).players.length, 3);
+  for (const s of B) assert.equal(s.events.some(e => e.ev.startsWith('game:') || e.ev === 'timer:update'), false);
+  assert.equal(lastState(A[0]).players.length, 2);
+});
+
+test('raw junk frames are ignored, oversized messages close the connection', async () => {
+  const [host, p1] = await makeRoom(2);
+  for (const junk of ['not json', '[]', '[1,2]', 'null', '42', '"x"', '{}', '{"t":5}', '{"t":"__proto__"}',
+    '{"t":"constructor","id":1}', '{"t":"toString","d":{},"id":2}', '{"t":"room:settings","d":{"__proto__":{"polluted":1}}}',
+    '{"t":"game:start","id":-1}', '{"t":"game:start","id":"x"}']) {
+    p1.raw(junk);
+  }
+  p1.ws.send(Buffer.from([1, 2, 3])); // binary frames are ignored
+  const pong = waitFor(p1, 'pong');
+  p1.raw('{"t":"ping"}');
+  await pong;
+  assert.equal({}.polluted, undefined);
+  assert.equal(roomOf(host).state, 'lobby');
+  assert.equal(roomOf(host).players.get(p1.pid).connected, true, 'junk does not cost the seat');
+
+  const closed = waitFor(p1, 'close');
+  p1.raw(JSON.stringify({ t: 'chat:send', d: 'x'.repeat(5000) }));
+  assert.equal(await closed, 1009);
+  // The room carries on and the player can come back.
+  const back = await connect(host.code);
+  const r = await ack(back, 'room:resume', { code: host.code, token: p1.token });
+  assert.equal(r.success, true);
+});
+
+test('creating a room on a code that is already in use is refused', async () => {
+  const [host] = await makeRoom(2);
+  const s = await connect(host.code);
+  const r = await ack(s, 'room:create', { name: 'Thief', avatar: '🐱', token: newToken(), lang: 'en' });
+  assert.deepEqual(r, { success: false, error: 'taken' });
+  assert.equal(roomOf(host).hostId, host.pid);
+});
+
+test('empty rooms are cleaned up', async () => {
+  const [host, p1] = await makeRoom(2);
+  const code = host.code;
+  assert.ok(game.rooms.has(code));
+  await ack(p1, 'room:leave');
+  host.disconnect(); p1.disconnect();
+  await sleep(GRACE_MS + 300);
+  assert.equal(game.rooms.has(code), false, 'room is forgotten once nobody is left');
+  // A connection to an unused code leaves nothing behind either.
+  const s = await connect(code);
+  assert.ok(game.rooms.has(code));
+  s.disconnect();
+  await sleep(50);
+  assert.equal(game.rooms.has(code), false);
 });
