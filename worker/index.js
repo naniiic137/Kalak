@@ -5,14 +5,14 @@ import roomLib from '../lib/room.js';
 
 const { createRoom, makeConn, genCode, normalizeCode } = roomLib;
 
-// The Pages site (kalak-hbi.pages.dev, plus its preview subdomains) only serves the files and uses this
+// The Pages site (kalak-aar.pages.dev, plus its preview subdomains) only serves the files and uses this
 // Worker as its server; other sites may not. Browsers send Origin on fetch and WebSocket requests.
 function allowedOrigin(origin, self) {
   if (!origin || origin === self) return true;
   try {
     const { protocol, hostname } = new URL(origin);
     if (hostname === 'localhost' || hostname === '127.0.0.1') return true;
-    return protocol === 'https:' && (hostname === 'kalak-hbi.pages.dev' || hostname.endsWith('.kalak-hbi.pages.dev'));
+    return protocol === 'https:' && (hostname === 'kalak-aar.pages.dev' || hostname.endsWith('.kalak-aar.pages.dev'));
   } catch { return false; }
 }
 
