@@ -4,6 +4,8 @@
   "name": "kalak",
   "main": "worker/index.js",
   "compatibility_date": "2026-10-01",
+  // The workers.dev address is the game server for the Pages site, so keep it on.
+  "workers_dev": true,
   // public/ is served as static files; the Worker only runs for /api/rooms and /ws.
   "assets": { "directory": "./public", "binding": "ASSETS" },
   // One Durable Object per room code holds that room's game in memory.
