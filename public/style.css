@@ -84,6 +84,9 @@ body.en { direction: ltr; font-family: var(--fontEn); }
 .code-box { background:var(--card); border-radius:var(--r); padding:14px 20px; display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:20px; }
 .code-label { color:var(--tx3); font-size:13px; }
 .code-val { font-family:var(--fontEn); font-size:28px; font-weight:800; letter-spacing:6px; color:var(--yellow); }
+.invite-box { background:var(--card); border-radius:var(--r); padding:12px 16px; margin:-10px 0 20px; display:flex; flex-direction:column; gap:8px; }
+.invite-row { display:flex; gap:8px; align-items:center; }
+.invite-inp { flex:1; min-width:0; padding:8px 12px; font-size:13px; background:var(--bg2); border-radius:10px; text-align:left; }
 .players-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:8px; margin-bottom:16px; }
 .p-card { background:var(--card); border-radius:var(--r2); padding:12px 8px; text-align:center; position:relative; animation:pop .25s ease; transition:all .15s; }
 .p-card.host { border:2px solid var(--yellow); }

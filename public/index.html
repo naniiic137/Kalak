@@ -66,8 +66,14 @@
       <div class="code-box">
         <span class="code-label" data-i18n="roomCode">كود الغرفة</span>
         <span class="code-val" id="lobby-code">-----</span>
-        <button class="icon-btn" id="btn-copy">📋</button>
-        <button class="icon-btn" id="btn-share">🔗</button>
+        <button class="icon-btn" id="btn-copy" aria-label="copy code">📋</button>
+      </div>
+      <div class="invite-box">
+        <span class="code-label" data-i18n="inviteLink">رابط الدعوة</span>
+        <div class="invite-row">
+          <input type="text" id="lobby-link" class="inp invite-inp" dir="ltr" readonly aria-label="invite link">
+          <button class="btn btn-green btn-sm" id="btn-share" data-i18n="copyLink">نسخ الرابط</button>
+        </div>
       </div>
       <div class="players-grid" id="lobby-players"></div>
       <div class="settings-box" id="settings-box">

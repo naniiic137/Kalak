@@ -23,7 +23,7 @@ const TXT = {
     finalResults:'النتائج النهائية 🏆', gameOver:'🎉 انتهت اللعبة! 🎉', noMoreQ:'انتهت أسئلة الفئات المختارة',
     again:'العب مرة ثانية 🔄', home:'الرئيسية 🏠', kicked:'تم طردك من الغرفة', replaced:'فُتحت اللعبة في نافذة أخرى',
     playHere:'العب هنا', reconnecting:'جارٍ إعادة الاتصال…', enterCode:'أدخل كود الغرفة', enterName:'أدخل اسمك',
-    copied:'تم النسخ!', linkCopied:'تم نسخ الرابط!', rejoinFail:'انتهت لعبتك السابقة', and:'و',
+    copied:'تم النسخ!', linkCopied:'تم نسخ الرابط!', inviteLink:'رابط الدعوة', copyLink:'نسخ الرابط', rejoinFail:'انتهت لعبتك السابقة', and:'و',
     err_not_found:'الغرفة غير موجودة', err_kicked:'تم طردك من هذه الغرفة', err_started:'اللعبة بدأت بالفعل',
     err_full:'الغرفة ممتلئة', err_invalid:'بيانات غير صالحة', err_server:'حدث خطأ، حاول مرة أخرى', err_taken:'الكود مستخدم، حاول مرة أخرى',
     err_need2:'تحتاج لاعبَين على الأقل', err_own:'لا يمكنك التصويت لإجابتك', err_phase:'انتهى الوقت',
@@ -42,7 +42,7 @@ const TXT = {
     finalResults:'Final results 🏆', gameOver:'🎉 Game over! 🎉', noMoreQ:'No questions left in the chosen categories',
     again:'Play again 🔄', home:'Home 🏠', kicked:'You were removed from the room', replaced:'The game was opened in another tab',
     playHere:'Play here', reconnecting:'Reconnecting…', enterCode:'Enter the room code', enterName:'Enter your name',
-    copied:'Copied!', linkCopied:'Link copied!', rejoinFail:'Your previous game has ended', and:'&',
+    copied:'Copied!', linkCopied:'Link copied!', inviteLink:'Invite link', copyLink:'Copy link', rejoinFail:'Your previous game has ended', and:'&',
     err_not_found:'Room not found', err_kicked:'You were removed from this room', err_started:'Game already started',
     err_full:'Room is full', err_invalid:'Invalid input', err_server:'Something went wrong, try again', err_taken:'That code is in use, try again',
     err_need2:'You need at least 2 players', err_own:"You can't vote for your own answer", err_phase:'Time is up',
@@ -179,6 +179,7 @@ $('#input-name').onkeydown=e=>{if(e.key==='Enter')$('#btn-ready').click();};
 function updLobby(){
   const r=S.rs;if(!r)return;
   $('#lobby-code').textContent=r.code;
+  $('#lobby-link').value=inviteLink(r.code);
   const g=$('#lobby-players');g.innerHTML='';
   r.players.forEach(p=>{
     const d=document.createElement('div');
@@ -201,8 +202,21 @@ function updLobby(){
   $$('.lang-set').forEach(b=>b.classList.toggle('active',b.dataset.lang===r.settings.lang));
 }
 
-$('#btn-copy').onclick=()=>navigator.clipboard?.writeText($('#lobby-code').textContent).then(()=>toast(t('copied')));
-$('#btn-share').onclick=()=>navigator.clipboard?.writeText(`${location.origin}${location.pathname}?room=${$('#lobby-code').textContent}`).then(()=>toast(t('linkCopied')));
+const inviteLink=code=>`${location.origin}/?room=${code}`;
+// navigator.clipboard only exists on https/localhost; on a LAN address fall back to execCommand.
+function copyText(text,msg){
+  const fallback=()=>{
+    const ta=document.createElement('textarea');ta.value=text;ta.setAttribute('readonly','');
+    ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();
+    let ok=false;try{ok=document.execCommand('copy');}catch{/* ignore */}
+    ta.remove();if(ok)toast(msg);else{$('#lobby-link').select();}
+  };
+  if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(text).then(()=>toast(msg),fallback);
+  else fallback();
+}
+$('#btn-copy').onclick=()=>copyText($('#lobby-code').textContent,t('copied'));
+$('#btn-share').onclick=()=>copyText(inviteLink($('#lobby-code').textContent),t('linkCopied'));
+$('#lobby-link').onfocus=e=>e.target.select();
 
 $$('.chip').forEach(c=>{c.onclick=()=>{
   c.classList.toggle('on');
