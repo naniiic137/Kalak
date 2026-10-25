@@ -39,6 +39,19 @@ You can't vote for your own bluff (it is greyed out). If you type the real answe
 
 After the last round, a podium shows the top three (players with equal scores share a place) and the host can start a new game with the same group.
 
+**Host tools**
+
+During a game, the host (👑) has a bar at the bottom of the screen:
+
+| Button | What it does |
+| --- | --- |
+| **Pause / Resume** | Stops the timer for everyone. All players see "Paused by the host" until the host taps Resume. |
+| **Skip** | Ends the current step now: picks a random topic, or ends the writing or voting time. |
+| **Rounds** | Adds 1 or 3 more rounds (30 at most). Everyone sees the new total. |
+| **End** | After a confirm, ends the game and shows the final scores to everyone. |
+
+The host is also a player, so these tools never show them any answers or bluffs early. If the host leaves, the next player becomes host and gets the bar. In the lobby, the host can also remove a player.
+
 ## Features
 
 - **Rooms with join codes**: 5-character codes (without look-alike characters such as `0/O` or `1/I`) and an invite link (`/?room=CODE`) shown in the lobby with a **Copy link** button. Opening the link goes straight to the join form with the code filled in.
@@ -49,6 +62,7 @@ After the last round, a podium shows the top three (players with equal scores sh
 - **Host settings**: categories, number of rounds (1–30), answer time (10–120 s), vote time (10–60 s), max players and language. The language applies to the whole room: questions *and* every player's interface (text and RTL/LTR direction) switch together.
 - **Rotating topic picker**: the player who picks the category changes each round.
 - **Round breakdown**: the question, every answer, who wrote it and who voted for it, plus round points and a running scoreboard.
+- **Host tools during a game**: pause/resume, skip, add rounds and end the game (see [Host tools](#how-to-play)). The server checks that only the host uses them.
 - **Lobby chat**, avatar picker (30 emoji avatars, a random one by default), kick button for the host.
 - **Final podium** with a CSS confetti animation.
 - **Mobile-first UI** in Arabic (RTL) and English (LTR), Cairo + Fredoka fonts, designed to be played on phones around a table.
@@ -95,6 +109,8 @@ The server is the single source of truth. Clients only send intents (create/join
 
 A single server-side interval timer per room drives each phase (`setTimer`) and broadcasts `timer:update` every second. A phase also ends early as soon as every *connected* player has answered or voted; this is re-checked whenever someone disconnects or leaves, and if the topic picker leaves, a random topic is chosen right away.
 
+The host tools act on the same machine. **Pause** stops the timer where it is and sets `paused` in `room:state`; while paused, answers, votes and the topic pick are refused and nothing moves on. **Resume** carries on with the time that was left. **Skip** sends the phase and round the host saw, so a double tap only skips once. **End** jumps to `finished` (the podium says the host ended the game). Any phase change clears the pause. Only the current host can use them; this is checked in `lib/room.js`, so the Node server and the Worker both get it.
+
 ### WebSocket event flow
 
 Every message is JSON: `{ "t": event, "d": data, "id": ackId }` (`id` only when the sender wants an answer), and answers are `{ "ack": ackId, "d": reply }`. `public/net.js` wraps this in a socket.io-like `emit(event, data, ack)` / `on(event, fn)` API, pings every 25 s and reconnects with backoff.
@@ -104,6 +120,7 @@ Every message is JSON: `{ "t": event, "d": data, "id": ackId }` (`id` only when 
 | client → server | `room:create`, `room:join`, `room:resume`, `room:leave` | create / join / rejoin / leave a room (with an ack callback) |
 | client → server | `room:settings`, `room:kick` | host changes settings / removes a player |
 | client → server | `game:start`, `game:next`, `game:restart` | host controls the flow |
+| client → server | `host:pause`, `host:resume`, `host:skip`, `host:addRounds`, `host:endGame` | host tools during a game (the ack only says yes or no, with an error code) |
 | client → server | `game:pickCategory` | current picker chooses the topic |
 | client → server | `game:answer`, `game:vote` | submit a bluff / a vote (the ack says why it was refused: `real`, `own`...) |
 | client → server | `chat:send` | lobby chat |
@@ -123,7 +140,8 @@ Each browser gets a random **player token** stored in `localStorage` (`kalak_tok
 - Joining the same room again through the join form from the same browser also resumes the seat instead of creating a duplicate, so "Game already started" only applies to new players.
 - If the same token connects from a second tab, the newest tab takes the seat and the old one shows "The game was opened in another tab". (To test several players on one computer, use separate browser profiles or private windows.)
 - After 60 seconds without reconnecting, the seat is removed: it disappears from the scoreboard and the podium. A player who taps **Home** leaves right away.
-- If the host disconnects, the first connected player becomes host immediately (and keeps it if the old host comes back).
+- If the host disconnects, the first connected player becomes host immediately (and keeps it if the old host comes back). The host tools go with the role. A paused game stays paused until the new host resumes it.
+- A player who reconnects while the game is paused sees the pause and the frozen time.
 - Kicks are stored by token, so a kicked player can't rejoin that room by picking another name.
 
 ## Run locally
@@ -157,7 +175,7 @@ npm test
 Runs Node's built-in test runner (`node:test`, no test framework needed):
 
 - `test/logic.test.js`: unit tests for the pure rules in `lib/logic.js` (settings validation, answer normalisation and merging, scoring, tied ranks, question picking) and a check that every question has one clean answer.
-- `test/server.test.js`: end-to-end tests that start the real server on port **3609** (override with `KALAK_TEST_PORT`) and play through it with a small WebSocket client (`test/ws-client.js`): malformed, junk and oversized messages, full rounds, reload and resume, grace-period expiry, players and the host leaving mid-game, kicks, running out of questions, invalid room codes, two rooms running side by side, and empty rooms being cleaned up.
+- `test/server.test.js`: end-to-end tests that start the real server on port **3609** (override with `KALAK_TEST_PORT`) and play through it with a small WebSocket client (`test/ws-client.js`): malformed, junk and oversized messages, full rounds, reload and resume, grace-period expiry, players and the host leaving mid-game, kicks, running out of questions, invalid room codes, two rooms running side by side, empty rooms being cleaned up, and the host tools (only the host can use them, pause and resume keep the right time, skip, end game, add rounds, host hand-off, and no answers reach the host early).
 
 ### Playing on a LAN
 
