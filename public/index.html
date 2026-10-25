@@ -206,6 +206,44 @@
     </div>
   </div>
 
+  <!-- HOST CONTROLS: only the host sees the bar, during a game -->
+  <div id="host-bar" class="host-bar hidden" role="toolbar" aria-label="Host tools" data-i18n-aria="hostTools">
+    <span class="hb-crown" aria-hidden="true">👑</span>
+    <button class="hb-btn" id="hb-pause"><span class="hb-ic" id="hb-pause-ic">⏸️</span><span class="hb-lb" id="hb-pause-lb" data-i18n="hPause">إيقاف</span></button>
+    <button class="hb-btn" id="hb-skip"><span class="hb-ic">⏭️</span><span class="hb-lb" data-i18n="hSkip">تخطي</span></button>
+    <button class="hb-btn" id="hb-rounds" aria-expanded="false"><span class="hb-ic">➕</span><span class="hb-lb" data-i18n="hRounds">جولات</span></button>
+    <button class="hb-btn hb-end" id="hb-end"><span class="hb-ic">⏹️</span><span class="hb-lb" data-i18n="hEnd">إنهاء</span></button>
+  </div>
+  <div id="rounds-menu" class="hb-menu hidden">
+    <p class="hb-menu-t" id="rounds-now"></p>
+    <div class="hb-menu-row">
+      <button class="btn btn-green btn-sm" data-add="1" data-i18n="add1">+1 جولة</button>
+      <button class="btn btn-green btn-sm" data-add="3" data-i18n="add3">+3 جولات</button>
+    </div>
+  </div>
+
+  <!-- PAUSED (everyone) -->
+  <div id="paused" class="pause-ov hidden" role="status">
+    <div class="pause-card">
+      <div class="pause-ic">⏸️</div>
+      <h2 class="pause-t" data-i18n="pausedTitle">أوقف المضيف اللعبة مؤقتاً</h2>
+      <p class="pause-sub" data-i18n="pausedSub">الوقت متوقف حتى يتابع المضيف.</p>
+      <button class="btn btn-glow hidden" id="btn-resume" data-i18n="resume">متابعة ▶️</button>
+    </div>
+  </div>
+
+  <!-- END GAME CONFIRM (host) -->
+  <div id="confirm-end" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="end-q">
+    <div class="modal-card">
+      <h3 class="modal-t" id="end-q" data-i18n="endQ">إنهاء اللعبة الآن؟</h3>
+      <p class="modal-sub" data-i18n="endSub">سيذهب الجميع إلى النتائج النهائية.</p>
+      <div class="modal-row">
+        <button class="btn btn-outline" id="end-no" data-i18n="cancel">إلغاء</button>
+        <button class="btn btn-red" id="end-yes" data-i18n="endYes">إنهاء اللعبة</button>
+      </div>
+    </div>
+  </div>
+
   <div id="net" class="net-banner hidden" role="status"><span class="net-dot"></span><span data-i18n="reconnecting">جارٍ إعادة الاتصال…</span></div>
 
   <div id="toast" class="toast"></div>

@@ -28,6 +28,12 @@ const TXT = {
     err_full:'الغرفة ممتلئة', err_invalid:'بيانات غير صالحة', err_server:'حدث خطأ، حاول مرة أخرى', err_taken:'الكود مستخدم، حاول مرة أخرى',
     err_need2:'تحتاج لاعبَين على الأقل', err_own:'لا يمكنك التصويت لإجابتك', err_phase:'انتهى الوقت',
     sys_joined:'{n} انضم', sys_left:'{n} غادر', sys_kicked:'تم طرد {n}', sys_back:'{n} عاد',
+    hostTools:'أدوات المضيف', hPause:'إيقاف', hResume:'متابعة', hSkip:'تخطي', hRounds:'جولات', hEnd:'إنهاء',
+    add1:'\u2066+1\u2069 جولة', add3:'\u2066+3\u2069 جولات', roundsNow:'الجولات: {r}/{t}', roundsAdded:'أضاف المضيف جولات (المجموع {n})',
+    pausedTitle:'أوقف المضيف اللعبة مؤقتاً', pausedSub:'الوقت متوقف حتى يتابع المضيف.', resume:'متابعة ▶️',
+    endQ:'إنهاء اللعبة الآن؟', endSub:'سيذهب الجميع إلى النتائج النهائية.', endYes:'إنهاء اللعبة', cancel:'إلغاء',
+    endedByHost:'أنهى المضيف اللعبة', err_paused:'اللعبة متوقفة مؤقتاً', err_max:'هذا أقصى عدد من الجولات',
+    err_host:'هذا للمضيف فقط',
   },
   en:{
     tagline:'Challenge your friends with trivia!', create:'Create Room', joinRoom:'Join Room', join:'Join',
@@ -47,6 +53,12 @@ const TXT = {
     err_full:'Room is full', err_invalid:'Invalid input', err_server:'Something went wrong, try again', err_taken:'That code is in use, try again',
     err_need2:'You need at least 2 players', err_own:"You can't vote for your own answer", err_phase:'Time is up',
     sys_joined:'{n} joined', sys_left:'{n} left', sys_kicked:'{n} was removed', sys_back:'{n} is back',
+    hostTools:'Host tools', hPause:'Pause', hResume:'Resume', hSkip:'Skip', hRounds:'Rounds', hEnd:'End',
+    add1:'+1 round', add3:'+3 rounds', roundsNow:'Rounds: {r}/{t}', roundsAdded:'The host added rounds (now {n})',
+    pausedTitle:'Paused by the host', pausedSub:'The timer is stopped until the host resumes.', resume:'Resume ▶️',
+    endQ:'End the game now?', endSub:'Everyone goes to the final scores.', endYes:'End game', cancel:'Cancel',
+    endedByHost:'The host ended the game', err_paused:'The game is paused', err_max:'That is the most rounds allowed',
+    err_host:'Only the host can do that',
   },
 };
 
@@ -78,7 +90,7 @@ let S = {
 
 const $=s=>document.querySelector(s);
 const $$=s=>document.querySelectorAll(s);
-const show=id=>{$$('.screen').forEach(s=>s.classList.remove('active'));$(`#screen-${id}`)?.classList.add('active');S.screen=id;};
+const show=id=>{$$('.screen').forEach(s=>s.classList.remove('active'));$(`#screen-${id}`)?.classList.add('active');S.screen=id;if(typeof updHostBar==='function')updHostBar();};
 const toast=m=>{const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2800);};
 const esc=s=>{const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;};
 const t=k=>(TXT[S.lang]||TXT.ar)[k]??TXT.en[k]??k;
@@ -102,6 +114,7 @@ function setLang(l){
   $$('.lang-btn').forEach(b=>b.classList.toggle('active',b.dataset.lang===l));
   $$('[data-i18n]').forEach(e=>{e.textContent=t(e.dataset.i18n);});
   $$('[data-i18n-ph]').forEach(e=>{e.placeholder=t(e.dataset.i18nPh);});
+  $$('[data-i18n-aria]').forEach(e=>{e.setAttribute('aria-label',t(e.dataset.i18nAria));});
   $$('.chip').forEach(c=>{c.textContent=catL(c.dataset.c);});
   $$('.pick-cat-btn').forEach(b=>{b.textContent=catL(b.dataset.cat);});
   document.title=l==='ar'?'كَلَك | Kalak':'Kalak | كَلَك';
@@ -278,6 +291,7 @@ socket.on('error',m=>toast(errText(m)));
 
 function updHostControls(){
   const r=S.rs;if(!r)return;
+  updHostBar();
   if(S.screen==='results'&&S.results){
     const nb=$('#btn-next');
     nb.classList.toggle('hidden',!S.host);
@@ -291,12 +305,85 @@ function updHostControls(){
 }
 
 socket.on('room:state',r=>{
+  const prev=S.rs;
   S.rs=r;S.host=r.hostId===S.me;
   if(r.settings.lang!==S.lang)setLang(r.settings.lang);
   if(r.state==='lobby'&&S.screen!=='lobby'&&S.room)show('lobby');
   if(S.screen==='lobby')updLobby();
+  if(prev&&prev.state!=='lobby'&&r.state!=='lobby'&&r.totalRounds>prev.totalRounds){
+    toast(t('roundsAdded').replace('{n}',r.totalRounds));
+    if(S.results&&r.state==='results'&&r.totalRounds>S.results.round)S.results.isLast=false;
+    updRoundLabels();
+  }
   updHostControls();
 });
+
+// HOST CONTROLS (pause / skip / add rounds / end game). The server checks that we are the host;
+// its replies only say yes or no, so they can't show the host any answers.
+const GAME_SCREENS=['picking','question','voting','results'];
+const TIMED=['picking','question','voting'];
+const inGame=()=>!!(S.room&&S.rs&&GAME_SCREENS.includes(S.rs.state)&&GAME_SCREENS.includes(S.screen));
+function updRoundLabels(){
+  const r=S.rs;if(!r||!r.round)return;
+  const rt=`${r.round}/${r.totalRounds}`;
+  if(S.screen==='picking')$('#pick-round').textContent=`${t('round')} ${rt}`;
+  if(S.screen==='question')$('#q-round').textContent=rt;
+  if(S.screen==='voting')$('#vt-round').textContent=rt;
+  $('#rounds-now').textContent=t('roundsNow').replace('{r}',r.round).replace('{t}',r.totalRounds);
+}
+function updHostBar(){
+  const r=S.rs,on=S.host&&inGame();
+  $('#host-bar').classList.toggle('hidden',!on);
+  document.body.classList.toggle('has-hb',on);
+  if(!on){closeHostMenus();}
+  else{
+    const timed=TIMED.includes(r.state)&&S.screen===r.state;
+    $('#hb-pause-ic').textContent=r.paused?'▶️':'⏸️';
+    $('#hb-pause-lb').textContent=t(r.paused?'hResume':'hPause');
+    $('#hb-pause').disabled=!timed;
+    $('#hb-skip').disabled=!timed||S.skipped===`${r.state}:${r.round}`;
+    $$('#rounds-menu [data-add]').forEach(b=>{b.disabled=r.totalRounds>=30;});
+    updRoundLabels();
+  }
+  const paused=!!(r&&r.paused&&inGame());
+  $('#paused').classList.toggle('hidden',!paused);
+  $('#btn-resume').classList.toggle('hidden',!(paused&&S.host));
+}
+function closeHostMenus(){
+  $('#rounds-menu').classList.add('hidden');$('#hb-rounds').setAttribute('aria-expanded','false');
+  $('#confirm-end').classList.add('hidden');
+}
+function hostCmd(ev,data){
+  socket.emit(ev,data,r=>{
+    if(r&&!r.success&&r.error!=='phase')toast(errText(r.error));
+  });
+}
+$('#hb-pause').onclick=()=>hostCmd(S.rs&&S.rs.paused?'host:resume':'host:pause');
+$('#btn-resume').onclick=()=>hostCmd('host:resume');
+$('#hb-skip').onclick=()=>{
+  const r=S.rs;if(!r)return;
+  S.skipped=`${r.state}:${r.round}`; // one skip per phase, even on a double tap
+  $('#hb-skip').disabled=true;
+  hostCmd('host:skip',{phase:r.state,round:r.round});
+};
+$('#hb-rounds').onclick=e=>{
+  e.stopPropagation();
+  const m=$('#rounds-menu'),open=m.classList.contains('hidden');
+  closeHostMenus();
+  if(open){updRoundLabels();m.classList.remove('hidden');$('#hb-rounds').setAttribute('aria-expanded','true');}
+};
+$$('#rounds-menu [data-add]').forEach(b=>{b.onclick=e=>{
+  e.stopPropagation();
+  hostCmd('host:addRounds',parseInt(b.dataset.add,10));
+  closeHostMenus();
+};});
+$('#rounds-menu').onclick=e=>e.stopPropagation();
+$('#hb-end').onclick=e=>{e.stopPropagation();closeHostMenus();$('#confirm-end').classList.remove('hidden');$('#end-no').focus();};
+$('#end-no').onclick=closeHostMenus;
+$('#end-yes').onclick=()=>{closeHostMenus();hostCmd('host:endGame');};
+$('#confirm-end').onclick=e=>{if(e.target===e.currentTarget)closeHostMenus();};
+document.addEventListener('click',()=>$('#rounds-menu').classList.add('hidden'));
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeHostMenus();});
 
 // TIMER
 socket.on('timer:update',({left,max})=>{
@@ -444,7 +531,7 @@ $('#btn-next').onclick=()=>socket.emit('game:next');
 
 // FINAL
 function renderFinal(d,celebrate){
-  $('#final-note').textContent=d.reason==='no_questions'?t('noMoreQ'):'';
+  $('#final-note').textContent=d.reason==='no_questions'?t('noMoreQ'):d.reason==='host'?t('endedByHost'):'';
   const ranked=withRanks(d.players,p=>p.score);
   const p=$('#podium');p.innerHTML='';
   [1,0,2].forEach((i,di)=>{
