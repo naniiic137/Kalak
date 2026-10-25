@@ -121,7 +121,8 @@ test('malformed events are ignored and never crash the process', async () => {
   const [host, p1] = await makeRoom(2);
   const junk = [undefined, null, 1, 'x', {}, [], { code: 5 }, { name: {} }, () => {}];
   for (const ev of ['room:create', 'room:join', 'room:resume', 'room:settings', 'room:kick', 'game:pickCategory',
-    'game:answer', 'game:vote', 'game:next', 'game:restart', 'chat:send', 'debug:getAnswers', 'debug:skip']) {
+    'game:answer', 'game:vote', 'game:next', 'game:restart', 'chat:send', 'debug:getAnswers', 'debug:skip',
+    'host:pause', 'host:resume', 'host:skip', 'host:endGame', 'host:addRounds']) {
     for (const j of junk) { p1.emit(ev, j); p1.emit(ev, j, () => {}); }
   }
   await sleep(150);
@@ -465,4 +466,273 @@ test('empty rooms are cleaned up', async () => {
   s.disconnect();
   await sleep(50);
   assert.equal(game.rooms.has(code), false);
+});
+
+// ---------- host controls (pause / resume, skip, end game, add rounds) ----------
+
+const HOST_EVENTS = ['host:pause', 'host:resume', 'host:skip', 'host:endGame', 'host:addRounds'];
+
+test('only the host can use the host controls', async () => {
+  const ps = await makeRoom(3);
+  const [host, p1] = ps;
+  // Not in a game yet: nothing to pause or end, even for the host.
+  assert.deepEqual(await ack(host, 'host:pause'), { success: false, error: 'phase' });
+  assert.deepEqual(await ack(host, 'host:endGame'), { success: false, error: 'phase' });
+  assert.deepEqual(await ack(host, 'host:addRounds', 1), { success: false, error: 'phase' });
+
+  await toQuestion(ps, () => host.emit('game:start'));
+  const room = roomOf(host);
+  for (const ev of HOST_EVENTS) {
+    const data = ev === 'host:addRounds' ? 3 : ev === 'host:skip' ? { phase: 'question', round: 1 } : undefined;
+    assert.deepEqual(await ack(p1, ev, data), { success: false, error: 'host' }, ev);
+  }
+  // A connection without a seat can't use them either.
+  const stranger = await connect(host.code);
+  for (const ev of HOST_EVENTS) assert.deepEqual(await ack(stranger, ev, 1), { success: false, error: 'host' }, ev);
+  await sleep(50);
+  assert.equal(room.state, 'question');
+  assert.equal(room.paused, false);
+  assert.equal(room.settings.rounds, 5);
+});
+
+test('pause stops the timer for everyone and resume carries on with the time left', async () => {
+  const ps = await makeRoom(3);
+  const [host, p1, p2] = ps;
+  await toQuestion(ps, () => host.emit('game:start'));
+  await waitFor(p1, 'timer:update', d => d.left <= 29);
+
+  const pausedState = waitFor(p2, 'room:state', st => st.paused === true);
+  assert.deepEqual(await ack(host, 'host:pause'), { success: true });
+  await pausedState;
+  const left = roomOf(host).timeLeft;
+  assert.deepEqual(await ack(host, 'host:pause'), { success: true }, 'pausing twice is harmless');
+  const mark = p1.events.length;
+  await sleep(1600);
+  assert.equal(roomOf(host).timeLeft, left, 'the clock does not move while paused');
+  const ticks = p1.events.slice(mark).filter(e => e.ev === 'timer:update');
+  assert.ok(ticks.every(e => e.data.left === left), 'no countdown ticks while paused');
+
+  // Nothing can be answered while paused, and a player who reloads sees the pause and the frozen time.
+  assert.deepEqual(await ack(p1, 'game:answer', 'sneaky'), { success: false, error: 'paused' });
+  p2.disconnect();
+  await sleep(50);
+  const back = await connect(host.code);
+  const timer = waitFor(back, 'timer:update');
+  const st = waitFor(back, 'room:state');
+  assert.equal((await ack(back, 'room:resume', { code: host.code, token: p2.token })).success, true);
+  assert.equal((await st).paused, true);
+  assert.equal((await timer).left, left);
+  await sleep(1100);
+  assert.equal(roomOf(host).timeLeft, left, 'a reconnect does not restart the clock');
+
+  const resumed = waitFor(p1, 'room:state', s => s.paused === false);
+  const nextTick = waitFor(back, 'timer:update', d => d.left === left - 1, 1500);
+  assert.deepEqual(await ack(host, 'host:resume'), { success: true });
+  await resumed;
+  await nextTick;
+  assert.deepEqual(await ack(host, 'host:resume'), { success: true }, 'resuming twice is harmless');
+  assert.equal((await ack(p1, 'game:answer', 'now it counts')).success, true);
+});
+
+test('a round that could move on while paused waits for resume', async () => {
+  const ps = await makeRoom(2);
+  const [host, p1] = ps;
+  await toQuestion(ps, () => host.emit('game:start'));
+  await ack(host, 'game:answer', 'host bluff');
+  await ack(host, 'host:pause');
+  // p1 leaves while paused: normally the round would move on right away.
+  p1.disconnect();
+  await sleep(400);
+  assert.equal(roomOf(host).state, 'question', 'still paused on the question');
+  const vote = waitFor(host, 'game:vote', () => true, 1500);
+  await ack(host, 'host:resume');
+  await vote;
+});
+
+test('skip moves the current phase on, once per tap', async () => {
+  const ps = await makeRoom(3);
+  const [host] = ps;
+  const pick = waitFor(host, 'game:pick');
+  host.emit('game:start');
+  await pick;
+  const room = roomOf(host);
+  assert.deepEqual(await ack(host, 'host:skip', { phase: 'question', round: 1 }), { success: false, error: 'phase' });
+  for (const bad of [undefined, null, 'picking', { phase: 'picking' }, { phase: 'picking', round: '1' }]) {
+    assert.deepEqual(await ack(host, 'host:skip', bad), { success: false, error: 'phase' });
+  }
+
+  const q = waitFor(host, 'game:question');
+  assert.deepEqual(await ack(host, 'host:skip', { phase: 'picking', round: 1 }), { success: true });
+  await q;
+  assert.equal(room.state, 'question', 'a random topic was chosen');
+
+  // A double tap: only the first one counts.
+  const vote = waitFor(host, 'game:vote');
+  const [a, b] = await Promise.all([
+    ack(host, 'host:skip', { phase: 'question', round: 1 }),
+    ack(host, 'host:skip', { phase: 'question', round: 1 }),
+  ]);
+  assert.deepEqual([a.success, b.success], [true, false]);
+  await vote;
+  assert.equal(room.state, 'voting');
+
+  // Skip also works while paused, and the next phase is not paused.
+  await ack(host, 'host:pause');
+  const res = waitFor(host, 'game:results');
+  assert.deepEqual(await ack(host, 'host:skip', { phase: 'voting', round: 1 }), { success: true });
+  await res;
+  assert.equal(room.state, 'results');
+  assert.equal(room.paused, false);
+  assert.equal(lastState(host).paused, false);
+  assert.deepEqual(await ack(host, 'host:skip', { phase: 'results', round: 1 }), { success: false, error: 'phase' });
+  assert.deepEqual(await ack(host, 'host:pause'), { success: false, error: 'phase' }, 'no timer to pause on the results');
+});
+
+test('end game goes straight to the final scores for everyone', async () => {
+  const ps = await makeRoom(3);
+  const [host, p1] = ps;
+  await toQuestion(ps, () => host.emit('game:start'));
+  await ack(host, 'host:pause');
+  const ends = ps.map(s => waitFor(s, 'game:end'));
+  assert.deepEqual(await ack(host, 'host:endGame'), { success: true });
+  const [end] = await Promise.all(ends);
+  assert.equal(end.reason, 'host');
+  assert.equal(end.players.length, 3);
+  const room = roomOf(host);
+  assert.equal(room.state, 'finished');
+  assert.equal(room.paused, false);
+  assert.equal(room.timer, null);
+  assert.deepEqual(await ack(host, 'host:endGame'), { success: false, error: 'phase' }, 'ending twice is refused');
+  // "Play again" still works afterwards.
+  const lobby = waitFor(p1, 'room:state', s => s.state === 'lobby');
+  host.emit('game:restart');
+  await lobby;
+});
+
+test('add rounds raises the total, within the limit', async () => {
+  const ps = await makeRoom(2);
+  const [host, p1] = ps;
+  host.emit('room:settings', { rounds: 1 });
+  await sleep(50);
+  await toQuestion(ps, () => host.emit('game:start'));
+  for (const bad of [0, -1, 1.5, '3', null, 11, 1e9]) {
+    assert.deepEqual(await ack(host, 'host:addRounds', bad), { success: false, error: 'invalid' }, String(bad));
+  }
+  const st = waitFor(p1, 'room:state', s => s.totalRounds === 2);
+  assert.deepEqual(await ack(host, 'host:addRounds', 1), { success: true, rounds: 2 });
+  await st;
+
+  // What used to be the last round is not the last one any more.
+  const vote = await answerAll(ps, ['b1', 'b2']);
+  const res = waitFor(host, 'game:results');
+  const realId = vote.options.find(o => o.text === roomOf(host).question.aE).id;
+  for (const s of ps) await ack(s, 'game:vote', realId);
+  assert.equal((await res).isLast, false);
+  const pick = waitFor(host, 'game:pick');
+  host.emit('game:next');
+  await pick;
+  const q = waitFor(host, 'game:question');
+  await ack(host, 'host:skip', { phase: 'picking', round: 2 });
+  await q;
+  const v2 = waitFor(host, 'game:vote');
+  await ack(host, 'host:skip', { phase: 'question', round: 2 });
+  await v2;
+  const res2 = waitFor(host, 'game:results');
+  await ack(host, 'host:skip', { phase: 'voting', round: 2 });
+  assert.equal((await res2).isLast, true);
+
+  // Adding rounds on the results of the last round turns "Final results" into "Next".
+  assert.deepEqual(await ack(host, 'host:addRounds', 3), { success: true, rounds: 5 });
+  assert.equal(roomOf(host).lastResults.isLast, false, 'a player who reloads now sees "Next" too');
+  assert.equal(roomOf(host).lastResults.totalRounds, 5);
+
+  // Never more than 30 rounds.
+  for (let i = 0; i < 3; i++) await ack(host, 'host:addRounds', 10);
+  assert.equal(roomOf(host).settings.rounds, 30);
+  assert.deepEqual(await ack(host, 'host:addRounds', 1), { success: false, error: 'max' });
+});
+
+test('when the host leaves, the new host gets the controls and the old one loses them', async () => {
+  const ps = await makeRoom(3);
+  const [host, p1, p2] = ps;
+  await toQuestion(ps, () => host.emit('game:start'));
+  await ack(host, 'host:pause');
+  const handOff = waitFor(p1, 'room:state', st => st.hostId !== host.pid);
+  host.disconnect();
+  const st = await handOff;
+  assert.equal(st.paused, true, 'the room stays paused');
+  const nh = byPid(ps, st.hostId);
+  const other = [p1, p2].find(s => s !== nh);
+  assert.deepEqual(await ack(other, 'host:resume'), { success: false, error: 'host' });
+
+  // The old host comes back as a normal player.
+  const back = await connect(host.code);
+  assert.equal((await ack(back, 'room:resume', { code: host.code, token: host.token })).success, true);
+  assert.deepEqual(await ack(back, 'host:resume'), { success: false, error: 'host' });
+  assert.equal(roomOf(nh).paused, true);
+
+  assert.deepEqual(await ack(nh, 'host:resume'), { success: true });
+  assert.equal(roomOf(nh).paused, false);
+  assert.deepEqual(await ack(nh, 'host:addRounds', 1), { success: true, rounds: 6 });
+  const end = waitFor(back, 'game:end');
+  assert.deepEqual(await ack(nh, 'host:endGame'), { success: true });
+  assert.equal((await end).reason, 'host');
+});
+
+test('host controls never show the host any answers before everyone else sees them', async () => {
+  const ps = await makeRoom(3);
+  const [host, p1, p2] = ps;
+  await toQuestion(ps, () => host.emit('game:start'));
+  await sleep(50); // let every player get the question first
+  const room = roomOf(host);
+  const secrets = ['ZEBRA bluff one', 'ZEBRA bluff two', room.question.a, room.question.aE];
+  const replies = [];
+  const use = async (ev, data) => { const r = await ack(host, ev, data); replies.push(r); return r; };
+
+  const hostMark = host.events.length;
+  const p2Mark = p2.events.length;
+  await ack(p1, 'game:answer', secrets[0]);
+  await ack(p2, 'game:answer', secrets[1]);
+  await use('host:pause');
+  await use('host:addRounds', 1);
+  await use('host:addRounds', 'x'); // refused calls reply too
+  await use('host:skip', { phase: 'voting', round: 1 });
+  await use('host:resume');
+  const voteP = waitFor(host, 'game:vote');
+  const voteP2 = waitFor(p2, 'game:vote');
+  await use('host:skip', { phase: 'question', round: 1 });
+  const vote = await voteP;
+  const vote2 = await voteP2;
+
+  // Up to the vote list, nothing the host got mentions any bluff or the real answer.
+  const voteIdx = host.events.findIndex((e, i) => i >= hostMark && e.ev === 'game:vote');
+  const beforeVote = JSON.stringify(host.events.slice(hostMark, voteIdx)) + JSON.stringify(replies);
+  for (const s of secrets) assert.equal(beforeVote.includes(s), false, `host saw "${s}" early`);
+  for (const r of replies) assert.deepEqual(Object.keys(r).filter(k => !['success', 'error', 'rounds'].includes(k)), []);
+  // The host got exactly the same kinds of messages as another player.
+  const kinds = (s, from, to) => s.events.slice(from, to).map(e => e.ev).filter(ev => ev !== 'timer:update');
+  const p2VoteIdx = p2.events.findIndex((e, i) => i >= p2Mark && e.ev === 'game:vote');
+  assert.deepEqual(kinds(host, hostMark, voteIdx), kinds(p2, p2Mark, p2VoteIdx));
+
+  // The vote list says nothing about who wrote what, for the host or anyone else.
+  for (const o of vote.options) assert.deepEqual(Object.keys(o).sort(), ['id', 'own', 'text']);
+  assert.deepEqual(vote.options.map(o => o.text), vote2.options.map(o => o.text), 'same list for everyone');
+  assert.ok(vote.options.every(o => o.own === false), 'the host wrote nothing this round');
+
+  // While voting, the controls still say nothing about the votes or who wrote what.
+  const voteMark = host.events.length;
+  replies.length = 0;
+  await ack(p1, 'game:vote', vote.options.find(o => o.text !== secrets[0]).id);
+  await use('host:pause');
+  await use('host:addRounds', 1);
+  await use('host:resume');
+  const res = waitFor(host, 'game:results');
+  await use('host:skip', { phase: 'voting', round: 1 });
+  await res;
+  const resIdx = host.events.findIndex((e, i) => i >= voteMark && e.ev === 'game:results');
+  const duringVote = JSON.stringify(host.events.slice(voteMark, resIdx)) + JSON.stringify(replies);
+  for (const word of ['authors', 'voters', 'correct', 'answer"', ...secrets]) {
+    assert.equal(duringVote.includes(word), false, `host saw "${word}" during the vote`);
+  }
+  assert.equal(JSON.stringify(host.events).includes(host.token), false, 'tokens are never sent');
 });
