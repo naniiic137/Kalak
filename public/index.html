@@ -209,10 +209,10 @@
   <!-- HOST CONTROLS: only the host sees the bar, during a game -->
   <div id="host-bar" class="host-bar hidden" role="toolbar" aria-label="Host tools" data-i18n-aria="hostTools">
     <span class="hb-crown" aria-hidden="true">👑</span>
-    <button class="hb-btn" id="hb-pause"><span class="hb-ic" id="hb-pause-ic">⏸️</span><span class="hb-lb" id="hb-pause-lb" data-i18n="hPause">إيقاف</span></button>
-    <button class="hb-btn" id="hb-skip"><span class="hb-ic">⏭️</span><span class="hb-lb" data-i18n="hSkip">تخطي</span></button>
-    <button class="hb-btn" id="hb-rounds" aria-expanded="false"><span class="hb-ic">➕</span><span class="hb-lb" data-i18n="hRounds">جولات</span></button>
-    <button class="hb-btn hb-end" id="hb-end"><span class="hb-ic">⏹️</span><span class="hb-lb" data-i18n="hEnd">إنهاء</span></button>
+    <button class="hb-btn" id="hb-pause"><span class="hb-ic" id="hb-pause-ic"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg></span><span class="hb-lb" id="hb-pause-lb" data-i18n="hPause">إيقاف</span></button>
+    <button class="hb-btn" id="hb-skip"><span class="hb-ic"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M5 5.5v13l9-6.5z"/><rect x="15.5" y="5" width="3.5" height="14" rx="1"/></svg></span><span class="hb-lb" data-i18n="hSkip">تخطي</span></button>
+    <button class="hb-btn" id="hb-rounds" aria-expanded="false"><span class="hb-ic"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><rect x="10.5" y="4" width="3" height="16" rx="1"/><rect x="4" y="10.5" width="16" height="3" rx="1"/></svg></span><span class="hb-lb" data-i18n="hRounds">جولات</span></button>
+    <button class="hb-btn hb-end" id="hb-end"><span class="hb-ic"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></span><span class="hb-lb" data-i18n="hEnd">إنهاء</span></button>
   </div>
   <div id="rounds-menu" class="hb-menu hidden">
     <p class="hb-menu-t" id="rounds-now"></p>
@@ -225,10 +225,10 @@
   <!-- PAUSED (everyone) -->
   <div id="paused" class="pause-ov hidden" role="status">
     <div class="pause-card">
-      <div class="pause-ic">⏸️</div>
+      <div class="pause-ic"><svg viewBox="0 0 24 24" width="56" height="56" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg></div>
       <h2 class="pause-t" data-i18n="pausedTitle">أوقف المضيف اللعبة مؤقتاً</h2>
       <p class="pause-sub" data-i18n="pausedSub">الوقت متوقف حتى يتابع المضيف.</p>
-      <button class="btn btn-glow hidden" id="btn-resume" data-i18n="resume">متابعة ▶️</button>
+      <button class="btn btn-glow hidden" id="btn-resume" data-i18n="resume">متابعة</button>
     </div>
   </div>
 

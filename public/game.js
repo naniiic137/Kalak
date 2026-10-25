@@ -30,7 +30,7 @@ const TXT = {
     sys_joined:'{n} انضم', sys_left:'{n} غادر', sys_kicked:'تم طرد {n}', sys_back:'{n} عاد',
     hostTools:'أدوات المضيف', hPause:'إيقاف', hResume:'متابعة', hSkip:'تخطي', hRounds:'جولات', hEnd:'إنهاء',
     add1:'\u2066+1\u2069 جولة', add3:'\u2066+3\u2069 جولات', roundsNow:'الجولات: {r}/{t}', roundsAdded:'أضاف المضيف جولات (المجموع {n})',
-    pausedTitle:'أوقف المضيف اللعبة مؤقتاً', pausedSub:'الوقت متوقف حتى يتابع المضيف.', resume:'متابعة ▶️',
+    pausedTitle:'أوقف المضيف اللعبة مؤقتاً', pausedSub:'الوقت متوقف حتى يتابع المضيف.', resume:'متابعة',
     endQ:'إنهاء اللعبة الآن؟', endSub:'سيذهب الجميع إلى النتائج النهائية.', endYes:'إنهاء اللعبة', cancel:'إلغاء',
     endedByHost:'أنهى المضيف اللعبة', err_paused:'اللعبة متوقفة مؤقتاً', err_max:'هذا أقصى عدد من الجولات',
     err_host:'هذا للمضيف فقط',
@@ -55,7 +55,7 @@ const TXT = {
     sys_joined:'{n} joined', sys_left:'{n} left', sys_kicked:'{n} was removed', sys_back:'{n} is back',
     hostTools:'Host tools', hPause:'Pause', hResume:'Resume', hSkip:'Skip', hRounds:'Rounds', hEnd:'End',
     add1:'+1 round', add3:'+3 rounds', roundsNow:'Rounds: {r}/{t}', roundsAdded:'The host added rounds (now {n})',
-    pausedTitle:'Paused by the host', pausedSub:'The timer is stopped until the host resumes.', resume:'Resume ▶️',
+    pausedTitle:'Paused by the host', pausedSub:'The timer is stopped until the host resumes.', resume:'Resume',
     endQ:'End the game now?', endSub:'Everyone goes to the final scores.', endYes:'End game', cancel:'Cancel',
     endedByHost:'The host ended the game', err_paused:'The game is paused', err_max:'That is the most rounds allowed',
     err_host:'Only the host can do that',
@@ -338,7 +338,7 @@ function updHostBar(){
   if(!on){closeHostMenus();}
   else{
     const timed=TIMED.includes(r.state)&&S.screen===r.state;
-    $('#hb-pause-ic').textContent=r.paused?'▶️':'⏸️';
+    $('#hb-pause-ic').innerHTML=r.paused?'<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5z"/></svg>':'<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
     $('#hb-pause-lb').textContent=t(r.paused?'hResume':'hPause');
     $('#hb-pause').disabled=!timed;
     $('#hb-skip').disabled=!timed||S.skipped===`${r.state}:${r.round}`;
